@@ -93,7 +93,52 @@ export default function Dashboard() {
     repos: [],
   });
 
+  // Dummy data for bypass/dev mode
+  const dummyData: ResourceState = {
+    stacks: [
+      { id: 'stack-1', name: 'production-web', state: 'running' },
+      { id: 'stack-2', name: 'staging-api', state: 'running' },
+      { id: 'stack-3', name: 'dev-microservices', state: 'stopped' },
+    ],
+    deployments: [
+      { id: 'deploy-1', name: 'nginx-proxy', state: 'running' },
+      { id: 'deploy-2', name: 'postgres-db', state: 'running' },
+      { id: 'deploy-3', name: 'redis-cache', state: 'running' },
+      { id: 'deploy-4', name: 'api-gateway', state: 'pending' },
+      { id: 'deploy-5', name: 'worker-queue', state: 'stopped' },
+    ],
+    servers: [
+      { id: 'server-1', name: 'prod-node-01', state: 'healthy' },
+      { id: 'server-2', name: 'prod-node-02', state: 'healthy' },
+      { id: 'server-3', name: 'staging-node-01', state: 'unhealthy' },
+    ],
+    builds: [
+      { id: 'build-1', name: 'frontend-app', state: 'ok' },
+      { id: 'build-2', name: 'backend-api', state: 'building' },
+      { id: 'build-3', name: 'worker-service', state: 'failed' },
+    ],
+    repos: [
+      { id: 'repo-1', name: 'main-monorepo', state: 'ok' },
+      { id: 'repo-2', name: 'infra-config', state: 'ok' },
+    ],
+  };
+
+  const isBypassMode = localStorage.getItem('komodo_bypass') === 'true';
+
   const fetchResources = async (showRefresh = false) => {
+    if (isBypassMode) {
+      // Use dummy data in bypass mode
+      if (showRefresh) setIsRefreshing(true);
+      else setIsLoading(true);
+      
+      setTimeout(() => {
+        setResources(dummyData);
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }, 500);
+      return;
+    }
+
     if (!client) return;
     
     if (showRefresh) setIsRefreshing(true);
