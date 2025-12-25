@@ -31,8 +31,13 @@ export default function LoginPage() {
     setIsLoading(false);
   };
 
+  const handleBypass = () => {
+    localStorage.setItem('komodo_bypass', 'true');
+    window.location.reload();
+  };
+
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
       <Card className="w-full max-w-md border-2 border-foreground shadow-md">
         <CardHeader className="space-y-4 text-center pb-2">
           <div className="mx-auto w-16 h-16 border-2 border-foreground flex items-center justify-center bg-primary">
@@ -131,6 +136,15 @@ export default function LoginPage() {
           </form>
         </CardContent>
       </Card>
+      
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={handleBypass}
+        className="mt-8 text-muted-foreground/50 hover:text-muted-foreground font-mono text-xs"
+      >
+        Bypass (Dev Mode)
+      </Button>
     </div>
   );
 }
