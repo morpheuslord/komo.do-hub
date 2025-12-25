@@ -21,6 +21,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     async function loadStoredCredentials() {
       try {
+        // Check for bypass mode
+        const bypass = localStorage.getItem('komodo_bypass');
+        if (bypass === 'true') {
+          // Set mock credentials for dev mode
+          const mockCreds: KomodoCredentials = {
+            apiUrl: 'https://demo.komo.do',
+            apiKey: 'bypass-key',
+            apiSecret: 'bypass-secret',
+          };
+          setCredentials(mockCreds);
+          setClient(createKomodoClient(mockCreds));
+          setIsLoading(false);
+          return;
+        }
+
         const stored = await loadCredentials();
         if (stored) {
           const komodoClient = createKomodoClient(stored);
@@ -65,6 +80,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(() => {
     clearCredentials();
+    localStorage.removeItem('komodo_bypass');
     setCredentials(null);
     setClient(null);
   }, []);
