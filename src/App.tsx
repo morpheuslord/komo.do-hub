@@ -9,6 +9,7 @@ import { Loader2 } from "lucide-react";
 
 const queryClient = new QueryClient();
 
+
 function AppContent() {
   const { isAuthenticated, isLoading } = useAuth();
 
