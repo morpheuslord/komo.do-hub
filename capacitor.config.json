@@ -1,0 +1,9 @@
+{
+  "appId": "app.lovable.f631b03301f14963986d8378c2bc0859",
+  "appName": "Komo.do Manager",
+  "webDir": "dist",
+  "server": {
+    "url": "https://f631b033-01f1-4963-986d-8378c2bc0859.lovableproject.com?forceHideBadge=true",
+    "cleartext": true
+  }
+}

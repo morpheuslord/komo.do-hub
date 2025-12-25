@@ -1,0 +1,130 @@
+// Komodo API client wrapper
+import type { KomodoCredentials } from './crypto';
+
+export interface ApiResponse<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
+
+export interface KomodoClient {
+  read: <T>(type: string, params?: Record<string, unknown>) => Promise<ApiResponse<T>>;
+  write: <T>(type: string, params?: Record<string, unknown>) => Promise<ApiResponse<T>>;
+  execute: <T>(type: string, params?: Record<string, unknown>) => Promise<ApiResponse<T>>;
+  testConnection: () => Promise<boolean>;
+}
+
+export interface StackListItem {
+  id: string;
+  name: string;
+  state?: string;
+  status?: string;
+  server_id?: string;
+}
+
+export interface DeploymentListItem {
+  id: string;
+  name: string;
+  state?: string;
+  status?: string;
+  image?: string;
+  server_id?: string;
+}
+
+export interface ServerListItem {
+  id: string;
+  name: string;
+  state?: string;
+  status?: string;
+  region?: string;
+  address?: string;
+}
+
+export interface BuildListItem {
+  id: string;
+  name: string;
+  state?: string;
+  status?: string;
+  version?: string;
+}
+
+export interface RepoListItem {
+  id: string;
+  name: string;
+  state?: string;
+  status?: string;
+  repo?: string;
+  branch?: string;
+}
+
+export interface ProcedureListItem {
+  id: string;
+  name: string;
+  state?: string;
+}
+
+export interface AlerterListItem {
+  id: string;
+  name: string;
+  state?: string;
+}
+
+export interface UserInfo {
+  id: string;
+  username: string;
+  enabled: boolean;
+  admin: boolean;
+  create_server_permissions: boolean;
+  create_build_permissions: boolean;
+}
+
+export function createKomodoClient(credentials: KomodoCredentials): KomodoClient {
+  const baseUrl = credentials.apiUrl.replace(/\/$/, '');
+  
+  async function makeRequest<T>(
+    path: string,
+    type: string,
+    params: Record<string, unknown> = {}
+  ): Promise<ApiResponse<T>> {
+    try {
+      const response = await fetch(`${baseUrl}${path}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Api-Key': credentials.apiKey,
+          'X-Api-Secret': credentials.apiSecret,
+        },
+        body: JSON.stringify({ type, params }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        return {
+          success: false,
+          error: errorData.error || `HTTP ${response.status}: ${response.statusText}`,
+        };
+      }
+      
+      const data = await response.json();
+      return { success: true, data };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Network error',
+      };
+    }
+  }
+  
+  return {
+    read: <T>(type: string, params?: Record<string, unknown>) => 
+      makeRequest<T>('/read', type, params),
+    write: <T>(type: string, params?: Record<string, unknown>) => 
+      makeRequest<T>('/write', type, params),
+    execute: <T>(type: string, params?: Record<string, unknown>) => 
+      makeRequest<T>('/execute', type, params),
+    testConnection: async () => {
+      const result = await makeRequest('/read', 'GetVersion', {});
+      return result.success;
+    },
+  };
+}
