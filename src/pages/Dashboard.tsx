@@ -5,14 +5,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { 
-  Server, 
-  Layers, 
-  Box, 
-  Hammer, 
-  GitBranch, 
-  Settings, 
-  LogOut, 
+import {
+  Server,
+  Layers,
+  Box,
+  Hammer,
+  GitBranch,
+  Settings,
+  LogOut,
   RefreshCw,
   Play,
   Square,
@@ -22,12 +22,12 @@ import {
   Clock,
   Loader2
 } from 'lucide-react';
-import type { 
-  StackListItem, 
-  DeploymentListItem, 
-  ServerListItem, 
+import type {
+  StackListItem,
+  DeploymentListItem,
+  ServerListItem,
   BuildListItem,
-  RepoListItem 
+  RepoListItem
 } from '@/lib/komodo-api';
 import { useToast } from '@/hooks/use-toast';
 
@@ -35,7 +35,7 @@ type ResourceType = 'stacks' | 'deployments' | 'servers' | 'builds' | 'repos';
 
 interface ResourceState {
   stacks: StackListItem[];
-  deployments: DeploymentListItem[];
+  deployments: DeploymentListItem[]; // we'll use this to show containers (runtime) as well
   servers: ServerListItem[];
   builds: BuildListItem[];
   repos: RepoListItem[];
@@ -125,12 +125,23 @@ export default function Dashboard() {
 
   const isBypassMode = localStorage.getItem('komodo_bypass') === 'true';
 
+  /**
+   * fetchResources:
+   * - ListServers
+   * - For each server: call GetServerState (or GetServer) to retrieve health state
+   * - For each server: call ListDockerContainers to list running containers; combine into deployments array
+   *
+   * Notes:
+   * - `ListDockerContainers` and `GetServerState` are read operations present in the Komodo client API (docs).
+   * - We convert container objects to a minimal shape that the UI expects: { id, name, state }.
+   *
+   * See Komodo client docs for available read types: GetServerState / ListDockerContainers. :contentReference[oaicite:1]{index=1}
+   */
   const fetchResources = async (showRefresh = false) => {
     if (isBypassMode) {
-      // Use dummy data in bypass mode
       if (showRefresh) setIsRefreshing(true);
       else setIsLoading(true);
-      
+
       setTimeout(() => {
         setResources(dummyData);
         setIsLoading(false);
@@ -140,11 +151,11 @@ export default function Dashboard() {
     }
 
     if (!client) return;
-    
     if (showRefresh) setIsRefreshing(true);
     else setIsLoading(true);
 
     try {
+      // 1) List stacks, deployments (definitions), servers, builds, repos
       const [stacksRes, deploymentsRes, serversRes, buildsRes, reposRes] = await Promise.all([
         client.read<StackListItem[]>('ListStacks', {}),
         client.read<DeploymentListItem[]>('ListDeployments', {}),
@@ -153,10 +164,82 @@ export default function Dashboard() {
         client.read<RepoListItem[]>('ListRepos', {}),
       ]);
 
+      const serversList: ServerListItem[] = serversRes.data ?? [];
+
+      // 2) For each server, fetch runtime state and docker containers.
+      //    We parallelize but keep it bounded if you have many servers (here simple Promise.all).
+      const perServerPromises = serversList.map(async (srv) => {
+        // default values
+        let runtimeState: string | undefined = srv.state ?? srv.status;
+        let containers: { id: string; name: string; state?: string }[] = [];
+
+        try {
+          // Get server state (GetServerState / GetServer)
+          // some komodo versions may return `GetServer` or `GetServerState` — both are listed in docs.
+          const stateRes = await client.read<any>('GetServerState', { server: srv.id }).catch(() =>
+            client.read<any>('GetServer', { server: srv.id }).catch(() => ({ success: false }))
+          );
+
+          if (stateRes?.success && stateRes.data) {
+            // pick common fields if present
+            runtimeState =
+              stateRes.data?.health ?? stateRes.data?.status ?? stateRes.data?.state ?? runtimeState;
+          }
+        } catch (err) {
+          // ignore and leave runtimeState as-is
+        }
+
+        try {
+          // List running docker containers on that server
+          // ListDockerContainers is a documented read op in the Komodo client API.
+          const listContainersRes = await client.read<any[]>('ListDockerContainers', {
+            server: srv.id,
+          }).catch(() => ({ success: false }));
+
+          const containerItems = listContainersRes?.data ?? [];
+
+          containers = (containerItems || []).map((c: any) => {
+            // c shape can vary; tolerate different keys:
+            const id = c?.Id ?? c?.id ?? c?.container_id ?? JSON.stringify(c).slice(0, 12);
+            const name =
+              (Array.isArray(c?.Names) && c.Names[0]) ||
+              c?.Name ||
+              c?.Names?.[0] ||
+              c?.Names ||
+              c?.Image ||
+              id;
+            const state = c?.State ?? c?.Status ?? c?.state ?? 'unknown';
+            return { id, name, state };
+          });
+        } catch (err) {
+          // ignore per-server container failures
+        }
+
+        // return augmented server info + containers
+        return { server: { ...srv, state: runtimeState }, containers };
+      });
+
+      const perServerResults = await Promise.all(perServerPromises);
+
+      // Compose final arrays:
+      const updatedServers = perServerResults.map((r) => r.server);
+      // Flatten containers from all servers into deployments (so the "Containers" tab shows them)
+      const allContainersFlat = perServerResults.flatMap((r) =>
+        (r.containers || []).map((c) => ({
+          id: c.id,
+          name: c.name,
+          state: c.state,
+        }))
+      );
+
       setResources({
         stacks: stacksRes.data || [],
-        deployments: deploymentsRes.data || [],
-        servers: serversRes.data || [],
+        // keep deployment definitions (ListDeployments) AND also show runtime containers in the "deployments" tab
+        // You can combine both or prefer runtime containers; here we show containers if any exist, otherwise the definitions.
+        deployments: allContainersFlat.length > 0
+          ? (allContainersFlat as unknown as DeploymentListItem[])
+          : (deploymentsRes.data || []),
+        servers: updatedServers,
         builds: buildsRes.data || [],
         repos: reposRes.data || [],
       });
@@ -174,17 +257,18 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchResources();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client]);
 
   const handleAction = async (action: string, resourceType: string, resourceId: string, resourceName: string) => {
     if (!client) return;
-    
+
     setActionLoading(`${action}-${resourceId}`);
-    
+
     try {
       let result;
       const params = { [resourceType.toLowerCase().replace(/s$/, '')]: resourceId };
-      
+
       switch (action) {
         case 'deploy':
           result = await client.execute('DeployStack', params);
@@ -210,8 +294,8 @@ export default function Dashboard() {
         default:
           return;
       }
-      
-      if (result.success) {
+
+      if (result?.success) {
         toast({
           title: 'Action Started',
           description: `${action} on ${resourceName} initiated`,
@@ -220,7 +304,7 @@ export default function Dashboard() {
       } else {
         toast({
           title: 'Action Failed',
-          description: result.error || 'Unknown error',
+          description: result?.error || 'Unknown error',
           variant: 'destructive',
         });
       }
@@ -345,7 +429,8 @@ export default function Dashboard() {
             <div>
               <h1 className="font-bold text-lg tracking-tight">KOMO.DO</h1>
               <p className="font-mono text-xs text-muted-foreground truncate max-w-[200px]">
-                {credentials?.apiUrl}
+                {/* credentials.apiUrl may be undefined if you changed credential model — display host if available */}
+                {(credentials as any)?.apiUrl ?? `${(credentials as any)?.protocol}://${(credentials as any)?.host}:${(credentials as any)?.port}`}
               </p>
             </div>
           </div>
@@ -406,7 +491,7 @@ export default function Dashboard() {
                       </CardContent>
                     </Card>
                   ) : (
-                    resources[key].map((resource) =>
+                    resources[key].map((resource: any) =>
                       renderResourceCard(
                         resource,
                         key,

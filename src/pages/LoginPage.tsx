@@ -3,11 +3,24 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Server, Key, Lock, Loader2, AlertCircle } from 'lucide-react';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import {
+  Server,
+  Key,
+  Lock,
+  Loader2,
+  AlertCircle,
+} from 'lucide-react';
 
 export default function LoginPage() {
   const { login } = useAuth();
+
   const [apiUrl, setApiUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [apiSecret, setApiSecret] = useState('');
@@ -19,16 +32,31 @@ export default function LoginPage() {
     setError('');
     setIsLoading(true);
 
-    const result = await login({
-      apiUrl: apiUrl.trim(),
-      apiKey: apiKey.trim(),
-      apiSecret: apiSecret.trim(),
-    });
+    try {
+      const url = new URL(apiUrl.trim());
 
-    if (!result.success) {
-      setError(result.error || 'Authentication failed');
+      const credentials = {
+        protocol: url.protocol.replace(':', '') as 'http' | 'https',
+        host: url.hostname,
+        port: url.port
+          ? Number(url.port)
+          : url.protocol === 'https:'
+          ? 443
+          : 80,
+        apiKey: apiKey.trim(),
+        apiSecret: apiSecret.trim(),
+      };
+
+      const result = await login(credentials);
+
+      if (!result.success) {
+        setError(result.error ?? 'Authentication failed');
+      }
+    } catch {
+      setError('Invalid API URL. Example: http://192.168.1.57:9120');
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   const handleBypass = () => {
@@ -52,6 +80,7 @@ export default function LoginPage() {
             </CardDescription>
           </div>
         </CardHeader>
+
         <CardContent className="pt-4">
           <form onSubmit={handleSubmit} className="space-y-4">
             {error && (
@@ -60,9 +89,13 @@ export default function LoginPage() {
                 <span className="font-mono">{error}</span>
               </div>
             )}
-            
+
+            {/* API URL */}
             <div className="space-y-2">
-              <Label htmlFor="apiUrl" className="font-mono text-sm uppercase tracking-wider">
+              <Label
+                htmlFor="apiUrl"
+                className="font-mono text-sm uppercase tracking-wider"
+              >
                 API URL
               </Label>
               <div className="relative">
@@ -70,7 +103,7 @@ export default function LoginPage() {
                 <Input
                   id="apiUrl"
                   type="url"
-                  placeholder="https://your-komodo.example.com"
+                  placeholder="http://192.168.1.57:9120"
                   value={apiUrl}
                   onChange={(e) => setApiUrl(e.target.value)}
                   className="pl-10 font-mono text-sm border-2"
@@ -79,8 +112,12 @@ export default function LoginPage() {
               </div>
             </div>
 
+            {/* API Key */}
             <div className="space-y-2">
-              <Label htmlFor="apiKey" className="font-mono text-sm uppercase tracking-wider">
+              <Label
+                htmlFor="apiKey"
+                className="font-mono text-sm uppercase tracking-wider"
+              >
                 API Key
               </Label>
               <div className="relative">
@@ -88,7 +125,6 @@ export default function LoginPage() {
                 <Input
                   id="apiKey"
                   type="text"
-                  placeholder="your-api-key"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                   className="pl-10 font-mono text-sm border-2"
@@ -97,8 +133,12 @@ export default function LoginPage() {
               </div>
             </div>
 
+            {/* API Secret */}
             <div className="space-y-2">
-              <Label htmlFor="apiSecret" className="font-mono text-sm uppercase tracking-wider">
+              <Label
+                htmlFor="apiSecret"
+                className="font-mono text-sm uppercase tracking-wider"
+              >
                 API Secret
               </Label>
               <div className="relative">
@@ -106,7 +146,6 @@ export default function LoginPage() {
                 <Input
                   id="apiSecret"
                   type="password"
-                  placeholder="your-api-secret"
                   value={apiSecret}
                   onChange={(e) => setApiSecret(e.target.value)}
                   className="pl-10 font-mono text-sm border-2"
@@ -136,7 +175,7 @@ export default function LoginPage() {
           </form>
         </CardContent>
       </Card>
-      
+
       <Button
         variant="ghost"
         size="sm"

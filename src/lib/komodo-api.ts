@@ -14,6 +14,10 @@ export interface KomodoClient {
   testConnection: () => Promise<boolean>;
 }
 
+/* =========================
+   Entity Types (unchanged)
+   ========================= */
+
 export interface StackListItem {
   id: string;
   name: string;
@@ -78,9 +82,22 @@ export interface UserInfo {
   create_build_permissions: boolean;
 }
 
+/* =========================
+   Client Implementation
+   ========================= */
+
 export function createKomodoClient(credentials: KomodoCredentials): KomodoClient {
-  const baseUrl = credentials.apiUrl.replace(/\/$/, '');
-  
+  const {
+    protocol,
+    host,
+    port,
+    apiKey,
+    apiSecret,
+  } = credentials;
+
+  // ✅ Correct base URL construction
+  const baseUrl = `${protocol}://${host}:${port}`;
+
   async function makeRequest<T>(
     path: string,
     type: string,
@@ -91,20 +108,24 @@ export function createKomodoClient(credentials: KomodoCredentials): KomodoClient
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Api-Key': credentials.apiKey,
-          'X-Api-Secret': credentials.apiSecret,
+          'X-Api-Key': apiKey,
+          'X-Api-Secret': apiSecret,
         },
         body: JSON.stringify({ type, params }),
       });
-      
+
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        return {
-          success: false,
-          error: errorData.error || `HTTP ${response.status}: ${response.statusText}`,
-        };
+        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        try {
+          const errorData = await response.json();
+          if (errorData?.error) errorMessage = errorData.error;
+        } catch {
+          // ignore JSON parse failure
+        }
+
+        return { success: false, error: errorMessage };
       }
-      
+
       const data = await response.json();
       return { success: true, data };
     } catch (error) {
@@ -114,14 +135,17 @@ export function createKomodoClient(credentials: KomodoCredentials): KomodoClient
       };
     }
   }
-  
+
   return {
-    read: <T>(type: string, params?: Record<string, unknown>) => 
+    read: <T>(type: string, params?: Record<string, unknown>) =>
       makeRequest<T>('/read', type, params),
-    write: <T>(type: string, params?: Record<string, unknown>) => 
+
+    write: <T>(type: string, params?: Record<string, unknown>) =>
       makeRequest<T>('/write', type, params),
-    execute: <T>(type: string, params?: Record<string, unknown>) => 
+
+    execute: <T>(type: string, params?: Record<string, unknown>) =>
       makeRequest<T>('/execute', type, params),
+
     testConnection: async () => {
       const result = await makeRequest('/read', 'GetVersion', {});
       return result.success;
