@@ -46,6 +46,12 @@ export interface ServerListItem {
   status?: string;
   region?: string;
   address?: string;
+  // Stats from GetSystemStats
+  cpu_perc?: number;
+  mem_used_gb?: number;
+  mem_total_gb?: number;
+  disk_used_gb?: number;
+  disk_total_gb?: number;
 }
 
 export interface BuildListItem {
