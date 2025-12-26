@@ -20,7 +20,11 @@ import {
   AlertCircle,
   CheckCircle2,
   Clock,
-  Loader2
+  Loader2,
+  Cpu,
+  HardDrive,
+  Trash2,
+  Pause
 } from 'lucide-react';
 import type {
   StackListItem,
@@ -118,9 +122,9 @@ export default function Dashboard() {
       { id: 'deploy-5', name: 'worker-queue', state: 'stopped', serverName: 'staging-node-01', stats: 'Exited (0)' },
     ],
     servers: [
-      { id: 'server-1', name: 'prod-node-01', state: 'healthy' },
-      { id: 'server-2', name: 'prod-node-02', state: 'healthy' },
-      { id: 'server-3', name: 'staging-node-01', state: 'unhealthy' },
+      { id: 'server-1', name: 'prod-node-01', state: 'healthy', address: '192.168.1.10', cpu_perc: 45.2, mem_used_gb: 12.4, mem_total_gb: 32, disk_used_gb: 180, disk_total_gb: 500 },
+      { id: 'server-2', name: 'prod-node-02', state: 'healthy', address: '192.168.1.11', cpu_perc: 28.7, mem_used_gb: 8.2, mem_total_gb: 32, disk_used_gb: 95, disk_total_gb: 500 },
+      { id: 'server-3', name: 'staging-node-01', state: 'unhealthy', address: '192.168.1.20', cpu_perc: 92.1, mem_used_gb: 30.8, mem_total_gb: 32, disk_used_gb: 480, disk_total_gb: 500 },
     ],
     builds: [
       { id: 'build-1', name: 'frontend-app', state: 'ok' },
@@ -199,6 +203,27 @@ export default function Dashboard() {
           // ignore and leave runtimeState as-is
         }
 
+        // Fetch system stats (CPU, memory, disk)
+        let cpu_perc: number | undefined;
+        let mem_used_gb: number | undefined;
+        let mem_total_gb: number | undefined;
+        let disk_used_gb: number | undefined;
+        let disk_total_gb: number | undefined;
+
+        try {
+          const statsRes = await client.read<any>('GetSystemStats', { server: srv.id }).catch(() => ({ success: false, data: undefined }));
+          if (statsRes?.success && 'data' in statsRes && statsRes.data) {
+            const stats = statsRes.data;
+            cpu_perc = stats.cpu_perc ?? stats.cpu ?? stats.cpu_percent;
+            mem_used_gb = stats.mem_used_gb ?? (stats.mem_used ? stats.mem_used / 1024 / 1024 / 1024 : undefined);
+            mem_total_gb = stats.mem_total_gb ?? (stats.mem_total ? stats.mem_total / 1024 / 1024 / 1024 : undefined);
+            disk_used_gb = stats.disk_used_gb ?? (stats.disk_used ? stats.disk_used / 1024 / 1024 / 1024 : undefined);
+            disk_total_gb = stats.disk_total_gb ?? (stats.disk_total ? stats.disk_total / 1024 / 1024 / 1024 : undefined);
+          }
+        } catch (err) {
+          // ignore stats fetch failure
+        }
+
         try {
           // List running docker containers on that server
           // ListDockerContainers is a documented read op in the Komodo client API.
@@ -229,8 +254,19 @@ export default function Dashboard() {
           // ignore per-server container failures
         }
 
-        // return augmented server info + containers
-        return { server: { ...srv, state: runtimeState }, containers };
+        // return augmented server info + containers + stats
+        return {
+          server: {
+            ...srv,
+            state: runtimeState,
+            cpu_perc,
+            mem_used_gb,
+            mem_total_gb,
+            disk_used_gb,
+            disk_total_gb,
+          },
+          containers,
+        };
       });
 
       const perServerResults = await Promise.all(perServerPromises);
@@ -307,6 +343,22 @@ export default function Dashboard() {
           break;
         case 'pull':
           result = await client.execute('PullRepo', params);
+          break;
+        // Server management actions
+        case 'startAll':
+          result = await client.execute('StartAllContainers', { server: resourceId });
+          break;
+        case 'stopAll':
+          result = await client.execute('StopAllContainers', { server: resourceId });
+          break;
+        case 'restartAll':
+          result = await client.execute('RestartAllContainers', { server: resourceId });
+          break;
+        case 'pauseAll':
+          result = await client.execute('PauseAllContainers', { server: resourceId });
+          break;
+        case 'pruneSystem':
+          result = await client.execute('PruneSystem', { server: resourceId });
           break;
         default:
           return;
@@ -489,6 +541,119 @@ export default function Dashboard() {
     </Card>
   );
 
+  // Render server card with stats and management controls
+  const renderServerCard = (
+    server: ServerListItem,
+    actions: { label: string; action: string; icon: React.ReactNode }[]
+  ) => {
+    const cpuPercent = server.cpu_perc ?? 0;
+    const memUsed = server.mem_used_gb ?? 0;
+    const memTotal = server.mem_total_gb ?? 1;
+    const diskUsed = server.disk_used_gb ?? 0;
+    const diskTotal = server.disk_total_gb ?? 1;
+    const memPercent = memTotal > 0 ? (memUsed / memTotal) * 100 : 0;
+    const diskPercent = diskTotal > 0 ? (diskUsed / diskTotal) * 100 : 0;
+
+    return (
+      <Card key={server.id} className="border-2 border-foreground shadow-xs hover:shadow-sm transition-shadow">
+        <CardContent className="p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+              <div className="p-2 border-2 border-foreground bg-secondary flex-shrink-0">
+                <Server className="w-5 h-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="font-mono font-bold text-sm truncate">{server.name}</h3>
+                {server.address && (
+                  <p className="font-mono text-xs text-muted-foreground truncate">{server.address}</p>
+                )}
+                <div className="flex items-center gap-2 mt-1">
+                  {getStatusIcon(server.state)}
+                  <Badge variant={getStatusVariant(server.state)} className="font-mono text-xs uppercase">
+                    {server.state || 'unknown'}
+                  </Badge>
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-1 flex-shrink-0">
+              {actions.map((act) => (
+                <Button
+                  key={act.action}
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8 border-2"
+                  onClick={() => handleAction(act.action, 'servers', server.id, server.name)}
+                  disabled={actionLoading === `${act.action}-${server.id}`}
+                  title={act.label}
+                >
+                  {actionLoading === `${act.action}-${server.id}` ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    act.icon
+                  )}
+                </Button>
+              ))}
+            </div>
+          </div>
+          
+          {/* Stats Section */}
+          <div className="mt-4 space-y-2">
+            {/* CPU */}
+            <div className="flex items-center gap-2">
+              <Cpu className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+              <div className="flex-1">
+                <div className="flex justify-between text-xs font-mono mb-1">
+                  <span>CPU</span>
+                  <span>{cpuPercent.toFixed(1)}%</span>
+                </div>
+                <div className="h-2 bg-secondary border border-foreground">
+                  <div
+                    className="h-full bg-primary transition-all"
+                    style={{ width: `${Math.min(cpuPercent, 100)}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+            
+            {/* Memory */}
+            <div className="flex items-center gap-2">
+              <Box className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+              <div className="flex-1">
+                <div className="flex justify-between text-xs font-mono mb-1">
+                  <span>RAM</span>
+                  <span>{memUsed.toFixed(1)} / {memTotal.toFixed(1)} GB</span>
+                </div>
+                <div className="h-2 bg-secondary border border-foreground">
+                  <div
+                    className="h-full bg-chart-2 transition-all"
+                    style={{ width: `${Math.min(memPercent, 100)}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+            
+            {/* Disk */}
+            <div className="flex items-center gap-2">
+              <HardDrive className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+              <div className="flex-1">
+                <div className="flex justify-between text-xs font-mono mb-1">
+                  <span>Disk</span>
+                  <span>{diskUsed.toFixed(1)} / {diskTotal.toFixed(1)} GB</span>
+                </div>
+                <div className="h-2 bg-secondary border border-foreground">
+                  <div
+                    className="h-full bg-chart-4 transition-all"
+                    style={{ width: `${Math.min(diskPercent, 100)}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
+
   const tabConfig = {
     stacks: {
       icon: <Layers className="w-4 h-4" />,
@@ -510,7 +675,12 @@ export default function Dashboard() {
       icon: <Server className="w-4 h-4" />,
       label: 'Servers',
       resourceIcon: <Server className="w-5 h-5" />,
-      actions: [],
+      actions: [
+        { label: 'Start All', action: 'startAll', icon: <Play className="h-4 w-4" /> },
+        { label: 'Stop All', action: 'stopAll', icon: <Square className="h-4 w-4" /> },
+        { label: 'Restart All', action: 'restartAll', icon: <RotateCcw className="h-4 w-4" /> },
+        { label: 'Prune', action: 'pruneSystem', icon: <Trash2 className="h-4 w-4" /> },
+      ],
     },
     builds: {
       icon: <Hammer className="w-4 h-4" />,
@@ -620,6 +790,9 @@ export default function Dashboard() {
                       }
                       if (key === 'deployments') {
                         return renderContainerCard(resource, tabConfig[key].actions);
+                      }
+                      if (key === 'servers') {
+                        return renderServerCard(resource, tabConfig[key].actions);
                       }
                       return renderResourceCard(
                         resource,
