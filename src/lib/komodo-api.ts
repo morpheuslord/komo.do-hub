@@ -24,6 +24,7 @@ export interface StackListItem {
   state?: string;
   status?: string;
   server_id?: string;
+  tags?: string[];
 }
 
 export interface DeploymentListItem {
@@ -33,6 +34,9 @@ export interface DeploymentListItem {
   status?: string;
   image?: string;
   server_id?: string;
+  serverName?: string;
+  serverId?: string;
+  stats?: string;
 }
 
 export interface ServerListItem {

@@ -93,19 +93,29 @@ export default function Dashboard() {
     repos: [],
   });
 
+  // Extended container type with server affiliation and stats
+  interface ContainerItem {
+    id: string;
+    name: string;
+    state?: string;
+    serverName?: string;
+    serverId?: string;
+    stats?: string; // e.g. "Up 2 hours" or CPU/memory
+  }
+
   // Dummy data for bypass/dev mode
   const dummyData: ResourceState = {
     stacks: [
-      { id: 'stack-1', name: 'production-web', state: 'running' },
-      { id: 'stack-2', name: 'staging-api', state: 'running' },
-      { id: 'stack-3', name: 'dev-microservices', state: 'stopped' },
+      { id: 'stack-1', name: 'production-web', state: 'running', tags: ['v1.2.3', 'stable'] },
+      { id: 'stack-2', name: 'staging-api', state: 'running', tags: ['v2.0.0-beta'] },
+      { id: 'stack-3', name: 'dev-microservices', state: 'stopped', tags: ['dev'] },
     ],
     deployments: [
-      { id: 'deploy-1', name: 'nginx-proxy', state: 'running' },
-      { id: 'deploy-2', name: 'postgres-db', state: 'running' },
-      { id: 'deploy-3', name: 'redis-cache', state: 'running' },
-      { id: 'deploy-4', name: 'api-gateway', state: 'pending' },
-      { id: 'deploy-5', name: 'worker-queue', state: 'stopped' },
+      { id: 'deploy-1', name: 'nginx-proxy', state: 'running', serverName: 'prod-node-01', stats: 'Up 3 days' },
+      { id: 'deploy-2', name: 'postgres-db', state: 'running', serverName: 'prod-node-01', stats: 'Up 3 days' },
+      { id: 'deploy-3', name: 'redis-cache', state: 'running', serverName: 'prod-node-02', stats: 'Up 1 day' },
+      { id: 'deploy-4', name: 'api-gateway', state: 'pending', serverName: 'staging-node-01', stats: 'Starting...' },
+      { id: 'deploy-5', name: 'worker-queue', state: 'stopped', serverName: 'staging-node-01', stats: 'Exited (0)' },
     ],
     servers: [
       { id: 'server-1', name: 'prod-node-01', state: 'healthy' },
@@ -171,7 +181,7 @@ export default function Dashboard() {
       const perServerPromises = serversList.map(async (srv) => {
         // default values
         let runtimeState: string | undefined = srv.state ?? srv.status;
-        let containers: { id: string; name: string; state?: string }[] = [];
+        let containers: ContainerItem[] = [];
 
         try {
           // Get server state (GetServerState / GetServer)
@@ -200,16 +210,20 @@ export default function Dashboard() {
 
           containers = (containerItems || []).map((c: any) => {
             // c shape can vary; tolerate different keys:
-            const id = c?.Id ?? c?.id ?? c?.container_id ?? JSON.stringify(c).slice(0, 12);
-            const name =
+            const id = c?.Id ?? c?.id ?? c?.container_id ?? '';
+            // Extract clean container name (remove leading slash if present)
+            let rawName =
               (Array.isArray(c?.Names) && c.Names[0]) ||
               c?.Name ||
+              c?.name ||
               c?.Names?.[0] ||
-              c?.Names ||
-              c?.Image ||
-              id;
+              '';
+            // Docker names often start with "/" - strip it
+            const name = rawName.replace(/^\//, '') || c?.Image?.split(':')[0] || id.slice(0, 12);
             const state = c?.State ?? c?.Status ?? c?.state ?? 'unknown';
-            return { id, name, state };
+            // Extract uptime/stats from Status field (e.g., "Up 3 hours")
+            const stats = c?.Status ?? c?.status ?? '';
+            return { id, name, state, serverName: srv.name, serverId: srv.id, stats };
           });
         } catch (err) {
           // ignore per-server container failures
@@ -229,6 +243,9 @@ export default function Dashboard() {
           id: c.id,
           name: c.name,
           state: c.state,
+          serverName: c.serverName,
+          serverId: c.serverId,
+          stats: c.stats,
         }))
       );
 
@@ -318,6 +335,112 @@ export default function Dashboard() {
       setActionLoading(null);
     }
   };
+
+  // Render container card with: Primary=name, Secondary=stats, Tertiary=server
+  const renderContainerCard = (
+    container: { id: string; name: string; state?: string; serverName?: string; stats?: string },
+    actions: { label: string; action: string; icon: React.ReactNode }[]
+  ) => (
+    <Card key={container.id} className="border-2 border-foreground shadow-xs hover:shadow-sm transition-shadow">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className="p-2 border-2 border-foreground bg-secondary flex-shrink-0">
+              <Box className="w-5 h-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h3 className="font-mono font-bold text-sm truncate">{container.name}</h3>
+              {container.stats && (
+                <p className="font-mono text-xs text-muted-foreground truncate">{container.stats}</p>
+              )}
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                {getStatusIcon(container.state)}
+                <Badge variant={getStatusVariant(container.state)} className="font-mono text-xs uppercase">
+                  {container.state || 'unknown'}
+                </Badge>
+                {container.serverName && (
+                  <Badge variant="outline" className="font-mono text-xs">
+                    <Server className="w-3 h-3 mr-1" />
+                    {container.serverName}
+                  </Badge>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-1 flex-shrink-0">
+            {actions.map((act) => (
+              <Button
+                key={act.action}
+                variant="outline"
+                size="icon"
+                className="h-8 w-8 border-2"
+                onClick={() => handleAction(act.action, 'deployments', container.id, container.name)}
+                disabled={actionLoading === `${act.action}-${container.id}`}
+                title={act.label}
+              >
+                {actionLoading === `${act.action}-${container.id}` ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  act.icon
+                )}
+              </Button>
+            ))}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+
+  // Render stack card with tags displayed
+  const renderStackCard = (
+    stack: { id: string; name: string; state?: string; tags?: string[] },
+    actions: { label: string; action: string; icon: React.ReactNode }[]
+  ) => (
+    <Card key={stack.id} className="border-2 border-foreground shadow-xs hover:shadow-sm transition-shadow">
+      <CardContent className="p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className="p-2 border-2 border-foreground bg-secondary flex-shrink-0">
+              <Layers className="w-5 h-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h3 className="font-mono font-bold text-sm truncate">{stack.name}</h3>
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                {getStatusIcon(stack.state)}
+                <Badge variant={getStatusVariant(stack.state)} className="font-mono text-xs uppercase">
+                  {stack.state || 'unknown'}
+                </Badge>
+                {stack.tags && stack.tags.length > 0 && stack.tags.map((tag, idx) => (
+                  <Badge key={idx} variant="outline" className="font-mono text-xs">
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-1 flex-shrink-0">
+            {actions.map((act) => (
+              <Button
+                key={act.action}
+                variant="outline"
+                size="icon"
+                className="h-8 w-8 border-2"
+                onClick={() => handleAction(act.action, 'stacks', stack.id, stack.name)}
+                disabled={actionLoading === `${act.action}-${stack.id}`}
+                title={act.label}
+              >
+                {actionLoading === `${act.action}-${stack.id}` ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  act.icon
+                )}
+              </Button>
+            ))}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
 
   const renderResourceCard = (
     resource: { id: string; name: string; state?: string; status?: string },
@@ -491,14 +614,20 @@ export default function Dashboard() {
                       </CardContent>
                     </Card>
                   ) : (
-                    resources[key].map((resource: any) =>
-                      renderResourceCard(
+                    resources[key].map((resource: any) => {
+                      if (key === 'stacks') {
+                        return renderStackCard(resource, tabConfig[key].actions);
+                      }
+                      if (key === 'deployments') {
+                        return renderContainerCard(resource, tabConfig[key].actions);
+                      }
+                      return renderResourceCard(
                         resource,
                         key,
                         tabConfig[key].resourceIcon,
                         tabConfig[key].actions
-                      )
-                    )
+                      );
+                    })
                   )}
                 </div>
               </ScrollArea>
