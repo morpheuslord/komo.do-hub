@@ -177,10 +177,10 @@ export default function Dashboard() {
           // Get server state (GetServerState / GetServer)
           // some komodo versions may return `GetServer` or `GetServerState` — both are listed in docs.
           const stateRes = await client.read<any>('GetServerState', { server: srv.id }).catch(() =>
-            client.read<any>('GetServer', { server: srv.id }).catch(() => ({ success: false }))
+            client.read<any>('GetServer', { server: srv.id }).catch(() => ({ success: false, data: undefined }))
           );
 
-          if (stateRes?.success && stateRes.data) {
+          if (stateRes?.success && 'data' in stateRes && stateRes.data) {
             // pick common fields if present
             runtimeState =
               stateRes.data?.health ?? stateRes.data?.status ?? stateRes.data?.state ?? runtimeState;
@@ -194,9 +194,9 @@ export default function Dashboard() {
           // ListDockerContainers is a documented read op in the Komodo client API.
           const listContainersRes = await client.read<any[]>('ListDockerContainers', {
             server: srv.id,
-          }).catch(() => ({ success: false }));
+          }).catch(() => ({ success: false, data: undefined }));
 
-          const containerItems = listContainersRes?.data ?? [];
+          const containerItems = ('data' in listContainersRes && listContainersRes.data) ? listContainersRes.data : [];
 
           containers = (containerItems || []).map((c: any) => {
             // c shape can vary; tolerate different keys:
