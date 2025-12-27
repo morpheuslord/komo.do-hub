@@ -1,6 +1,12 @@
 {
   "appId": "com.komodo.app",
-  "appName": "Komo.do",
+  "appName": "Komodo Manager",
   "webDir": "dist",
-  "bundledWebRuntime": false
+  "bundledWebRuntime": false,
+  "android": {
+    "allowMixedContent": true
+  },
+  "server": {
+    "cleartext": true
+  }
 }
