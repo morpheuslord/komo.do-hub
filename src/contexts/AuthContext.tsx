@@ -30,18 +30,20 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
-  const [credentials, setCredentials] =
-    useState<KomodoCredentials | null>(null);
+  const [credentials, setCredentials] = useState<KomodoCredentials | null>(null);
   const [client, setClient] = useState<KomodoClient | null>(null);
 
   useEffect(() => {
-    async function loadStoredCredentials() {
+    function loadStoredCredentials() {
+      console.log('[Auth] Loading stored credentials...');
+      
       try {
         /* =========================
            Bypass / Dev Mode
            ========================= */
         const bypass = localStorage.getItem('komodo_bypass');
         if (bypass === 'true') {
+          console.log('[Auth] Bypass mode enabled');
           const mockCreds: KomodoCredentials = {
             protocol: 'https',
             host: 'demo.komo.do',
@@ -58,24 +60,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         /* =========================
-           Load Encrypted Credentials
+           Load Stored Credentials (synchronous)
            ========================= */
-        const stored = await loadCredentials();
-        if (!stored) return;
+        const stored = loadCredentials();
+        if (!stored) {
+          console.log('[Auth] No stored credentials');
+          setIsLoading(false);
+          return;
+        }
 
+        console.log('[Auth] Found stored credentials, validating...');
         const komodoClient = createKomodoClient(stored);
-        const isValid = await komodoClient.testConnection();
-
-        if (isValid) {
+        
+        // Validate connection in background
+        komodoClient.testConnection().then(isValid => {
+          if (isValid) {
+            console.log('[Auth] Credentials valid');
+            setCredentials(stored);
+            setClient(komodoClient);
+          } else {
+            console.log('[Auth] Credentials invalid, clearing');
+            clearCredentials();
+          }
+          setIsLoading(false);
+        }).catch(error => {
+          console.error('[Auth] Validation error:', error);
+          // Still set credentials - let user try to use them
+          // Network might just be slow on Android
           setCredentials(stored);
           setClient(komodoClient);
-        } else {
-          clearCredentials();
-        }
+          setIsLoading(false);
+        });
+        
       } catch (error) {
-        console.error('Failed to load credentials:', error);
+        console.error('[Auth] Failed to load credentials:', error);
         clearCredentials();
-      } finally {
         setIsLoading(false);
       }
     }
@@ -85,30 +104,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(
     async (newCredentials: KomodoCredentials) => {
+      console.log('[Auth] Attempting login...');
+      
       try {
         const komodoClient = createKomodoClient(newCredentials);
         const isValid = await komodoClient.testConnection();
 
         if (!isValid) {
+          console.log('[Auth] Connection test failed');
           return {
             success: false,
-            error:
-              'Failed to connect. Check host, port, protocol, and credentials.',
+            error: 'Failed to connect. Check host, port, protocol, and credentials.',
           };
         }
 
-        await saveCredentials(newCredentials);
+        console.log('[Auth] Connection successful, saving credentials');
+        saveCredentials(newCredentials);
         setCredentials(newCredentials);
         setClient(komodoClient);
 
         return { success: true };
       } catch (error) {
+        console.error('[Auth] Login error:', error);
         return {
           success: false,
-          error:
-            error instanceof Error
-              ? error.message
-              : 'Connection failed',
+          error: error instanceof Error ? error.message : 'Connection failed',
         };
       }
     },
@@ -116,6 +136,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(() => {
+    console.log('[Auth] Logging out');
     clearCredentials();
     localStorage.removeItem('komodo_bypass');
     setCredentials(null);
