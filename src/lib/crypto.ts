@@ -1,111 +1,62 @@
-// Simple encryption utilities for storing credentials locally
-// Uses Web Crypto API for AES-GCM encryption when available
-// Falls back to plaintext storage on Android WebView
+// Simple credential storage for Android-compatible local storage
+// Uses base64 encoding with a simple XOR scramble for obfuscation
+// This is NOT encryption but provides reasonable local protection
 
-const ENCRYPTION_KEY_NAME = 'komodo-encryption-key';
 const CREDENTIALS_KEY = 'komodo-credentials';
+const SCRAMBLE_KEY = 'K0m0d0-Scr4mbl3-K3y-2024'; // Obfuscation key
 
 /* =========================
-   Capability Check
+   XOR Scramble (works everywhere including Android WebView)
    ========================= */
 
-function isWebCryptoAvailable(): boolean {
-  return (
-    typeof window !== 'undefined' &&
-    !!window.crypto &&
-    !!window.crypto.subtle &&
-    typeof window.crypto.subtle.generateKey === 'function'
-  );
+function xorScramble(data: string, key: string): string {
+  let result = '';
+  for (let i = 0; i < data.length; i++) {
+    const charCode = data.charCodeAt(i) ^ key.charCodeAt(i % key.length);
+    result += String.fromCharCode(charCode);
+  }
+  return result;
+}
+
+function toBase64(str: string): string {
+  try {
+    // Handle Unicode properly
+    const bytes = new TextEncoder().encode(str);
+    let binary = '';
+    bytes.forEach(b => binary += String.fromCharCode(b));
+    return btoa(binary);
+  } catch {
+    // Fallback for older browsers
+    return btoa(unescape(encodeURIComponent(str)));
+  }
+}
+
+function fromBase64(base64: string): string {
+  try {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder().decode(bytes);
+  } catch {
+    // Fallback
+    return decodeURIComponent(escape(atob(base64)));
+  }
 }
 
 /* =========================
-   Key Management
+   Encode / Decode
    ========================= */
 
-async function getOrCreateKey(): Promise<CryptoKey> {
-  if (!isWebCryptoAvailable()) {
-    throw new Error('WebCrypto not available');
-  }
-
-  const storedKey = localStorage.getItem(ENCRYPTION_KEY_NAME);
-
-  if (storedKey) {
-    const keyData = Uint8Array.from(atob(storedKey), c => c.charCodeAt(0));
-    return crypto.subtle.importKey(
-      'raw',
-      keyData,
-      { name: 'AES-GCM' },
-      true,
-      ['encrypt', 'decrypt']
-    );
-  }
-
-  const key = await crypto.subtle.generateKey(
-    { name: 'AES-GCM', length: 256 },
-    true,
-    ['encrypt', 'decrypt']
-  );
-
-  const exportedKey = await crypto.subtle.exportKey('raw', key);
-  const keyString = btoa(
-    String.fromCharCode(...new Uint8Array(exportedKey))
-  );
-
-  localStorage.setItem(ENCRYPTION_KEY_NAME, keyString);
-  return key;
+function encodeCredentials(data: string): string {
+  const scrambled = xorScramble(data, SCRAMBLE_KEY);
+  return toBase64(scrambled);
 }
 
-/* =========================
-   Encrypt / Decrypt
-   ========================= */
-
-export async function encrypt(data: string): Promise<string> {
-  if (!isWebCryptoAvailable()) {
-    // Android WebView fallback
-    return data;
-  }
-
-  const key = await getOrCreateKey();
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const encoder = new TextEncoder();
-
-  const encrypted = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv },
-    key,
-    encoder.encode(data)
-  );
-
-  const combined = new Uint8Array(
-    iv.length + new Uint8Array(encrypted).length
-  );
-  combined.set(iv);
-  combined.set(new Uint8Array(encrypted), iv.length);
-
-  return btoa(String.fromCharCode(...combined));
-}
-
-export async function decrypt(encryptedData: string): Promise<string> {
-  if (!isWebCryptoAvailable()) {
-    // Android WebView fallback
-    return encryptedData;
-  }
-
-  const key = await getOrCreateKey();
-  const combined = Uint8Array.from(
-    atob(encryptedData),
-    c => c.charCodeAt(0)
-  );
-
-  const iv = combined.slice(0, 12);
-  const data = combined.slice(12);
-
-  const decrypted = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv },
-    key,
-    data
-  );
-
-  return new TextDecoder().decode(decrypted);
+function decodeCredentials(encoded: string): string {
+  const scrambled = fromBase64(encoded);
+  return xorScramble(scrambled, SCRAMBLE_KEY);
 }
 
 /* =========================
@@ -121,45 +72,66 @@ export interface KomodoCredentials {
 }
 
 /* =========================
-   Storage Helpers
+   Storage Helpers (Synchronous - works reliably on Android)
    ========================= */
 
-export async function saveCredentials(
-  credentials: KomodoCredentials
-): Promise<void> {
-  // Try encrypted path
+export function saveCredentials(credentials: KomodoCredentials): void {
   try {
-    const encrypted = await encrypt(JSON.stringify(credentials));
-    localStorage.setItem(CREDENTIALS_KEY, encrypted);
-  } catch {
-    // Absolute fallback (should not happen, but safe)
-    localStorage.setItem(
-      CREDENTIALS_KEY,
-      JSON.stringify(credentials)
-    );
+    const json = JSON.stringify(credentials);
+    const encoded = encodeCredentials(json);
+    localStorage.setItem(CREDENTIALS_KEY, encoded);
+    console.log('[Komodo] Credentials saved successfully');
+  } catch (error) {
+    console.error('[Komodo] Failed to save credentials:', error);
+    // Fallback: store as plain JSON (better than failing)
+    localStorage.setItem(CREDENTIALS_KEY, JSON.stringify(credentials));
   }
 }
 
-export async function loadCredentials(): Promise<KomodoCredentials | null> {
-  const stored = localStorage.getItem(CREDENTIALS_KEY);
-  if (!stored) return null;
-
-  // Try plaintext first (Android fallback)
+export function loadCredentials(): KomodoCredentials | null {
   try {
-    return JSON.parse(stored) as KomodoCredentials;
-  } catch {
-    // Not plaintext, try decrypt
-  }
+    const stored = localStorage.getItem(CREDENTIALS_KEY);
+    if (!stored) {
+      console.log('[Komodo] No stored credentials found');
+      return null;
+    }
 
-  try {
-    const decrypted = await decrypt(stored);
-    return JSON.parse(decrypted) as KomodoCredentials;
-  } catch {
+    // Try to decode (scrambled format)
+    try {
+      const decoded = decodeCredentials(stored);
+      const creds = JSON.parse(decoded) as KomodoCredentials;
+      console.log('[Komodo] Credentials loaded (encoded format)');
+      return creds;
+    } catch {
+      // Try plain JSON fallback
+      try {
+        const creds = JSON.parse(stored) as KomodoCredentials;
+        console.log('[Komodo] Credentials loaded (plain format)');
+        return creds;
+      } catch {
+        console.error('[Komodo] Failed to parse stored credentials');
+        return null;
+      }
+    }
+  } catch (error) {
+    console.error('[Komodo] Failed to load credentials:', error);
     return null;
   }
 }
 
 export function clearCredentials(): void {
   localStorage.removeItem(CREDENTIALS_KEY);
-  localStorage.removeItem(ENCRYPTION_KEY_NAME);
+  console.log('[Komodo] Credentials cleared');
+}
+
+/* =========================
+   Async wrappers for backward compatibility
+   ========================= */
+
+export async function saveCredentialsAsync(credentials: KomodoCredentials): Promise<void> {
+  saveCredentials(credentials);
+}
+
+export async function loadCredentialsAsync(): Promise<KomodoCredentials | null> {
+  return loadCredentials();
 }
