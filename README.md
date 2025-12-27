@@ -1,73 +1,231 @@
-# Welcome to your Lovable project
+# Komodo Manager
 
-## Project info
+A mobile-first server management console for [Komodo](https://komo.do) - monitor and control your servers, containers, stacks, builds, and repos from anywhere.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+**API by Komodo Team • App by Chiranjeevi G (Morpheuslord)**
 
-## How can I edit this code?
+---
 
-There are several ways of editing your application.
+## Screenshots
 
-**Use Lovable**
+<p align="center">
+  <img src="public/screenshots/login.png" alt="Login Screen" width="200"/>
+  <img src="public/screenshots/stacks.png" alt="Stacks View" width="200"/>
+  <img src="public/screenshots/containers.png" alt="Containers View" width="200"/>
+</p>
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+<p align="center">
+  <img src="public/screenshots/servers.png" alt="Servers View" width="200"/>
+  <img src="public/screenshots/builds.png" alt="Builds View" width="200"/>
+  <img src="public/screenshots/repos.png" alt="Repos View" width="200"/>
+</p>
 
-Changes made via Lovable will be committed automatically to this repo.
+---
 
-**Use your preferred IDE**
+## Features
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+- 🖥️ **Server Monitoring** - View CPU, RAM, and disk usage in real-time
+- 📦 **Container Management** - Start, stop, and restart containers
+- 🗂️ **Stack Management** - Deploy and manage Docker stacks
+- 🔨 **Build Tracking** - Monitor build status and trigger new builds
+- 🔗 **Repo Integration** - View and sync connected repositories
+- 🔐 **Secure Authentication** - Encrypted credential storage on device
+- 📱 **Mobile-First Design** - Built for Android with Capacitor
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+---
 
-Follow these steps:
+## Tech Stack
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+- **Frontend**: React 18, TypeScript, Vite
+- **UI**: Tailwind CSS, shadcn/ui
+- **Mobile**: Capacitor 8 (Android)
+- **API Client**: komodo_client
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+---
 
-# Step 3: Install the necessary dependencies.
-npm i
+## Development Setup
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+### Prerequisites
+
+- Node.js 18+ and npm
+- Git
+
+### Install Dependencies
+
+```bash
+git clone <your-repo-url>
+cd komodo-manager
+npm install
+```
+
+### Run Development Server
+
+```bash
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+The app will be available at `http://localhost:5173`
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+---
 
-**Use GitHub Codespaces**
+## Building for Android
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+### Prerequisites
 
-## What technologies are used for this project?
+- [Android Studio](https://developer.android.com/studio) (with SDK 24+)
+- Java JDK 17+
+- Android device or emulator
 
-This project is built with:
+### Step-by-Step Build Process
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+#### 1. Install Dependencies
 
-## How can I deploy this project?
+```bash
+npm install
+```
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+#### 2. Build the Web App
 
-## Can I connect a custom domain to my Lovable project?
+```bash
+npm run build
+```
 
-Yes, you can!
+#### 3. Add Android Platform (first time only)
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+```bash
+npx cap add android
+```
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+#### 4. Sync Web Assets to Android
+
+```bash
+npx cap sync android
+```
+
+> **Note**: Run `npx cap sync` every time you pull new changes or modify web code.
+
+#### 5. Open in Android Studio
+
+```bash
+npx cap open android
+```
+
+#### 6. Build APK
+
+In Android Studio:
+1. Go to **Build → Build Bundle(s) / APK(s) → Build APK(s)**
+2. Wait for the build to complete
+3. Click **locate** to find the APK
+
+Or from command line:
+
+```bash
+cd android
+./gradlew assembleRelease
+```
+
+The APK will be at: `android/app/build/outputs/apk/release/app-release.apk`
+
+#### 7. Run on Device/Emulator
+
+```bash
+npx cap run android
+```
+
+---
+
+## Configuration
+
+### Capacitor Config
+
+Edit `capacitor.config.json` to modify app settings:
+
+```json
+{
+  "appId": "com.komodo.app",
+  "appName": "Komodo Manager",
+  "webDir": "dist"
+}
+```
+
+### Development with Live Reload
+
+For testing on a physical device with live reload, update `capacitor.config.json`:
+
+```json
+{
+  "server": {
+    "url": "http://YOUR_LOCAL_IP:5173",
+    "cleartext": true
+  }
+}
+```
+
+> **Important**: Remove the `server` block before building for production.
+
+---
+
+## Connecting to Komodo API
+
+1. Launch the app
+2. Enter your Komodo server URL (e.g., `https://demo.komo.do:443`)
+3. Enter your API Key and API Secret
+4. Tap **Connect**
+
+Credentials are encrypted and stored locally on your device.
+
+---
+
+## Project Structure
+
+```
+├── src/
+│   ├── components/     # UI components
+│   ├── contexts/       # React contexts (Auth)
+│   ├── hooks/          # Custom hooks
+│   ├── lib/            # API client, utilities
+│   ├── pages/          # App screens
+│   └── assets/         # Images, logos
+├── android/            # Android native project
+├── public/             # Static assets
+└── capacitor.config.json
+```
+
+---
+
+## Troubleshooting
+
+### App crashes on Android
+
+- Ensure `npx cap sync` was run after the latest build
+- Check Android Studio Logcat for errors
+
+### API connection fails
+
+- Verify the server URL includes protocol and port
+- For HTTP (non-HTTPS), ensure `cleartext` is enabled in Capacitor config
+- Check that your device can reach the server network
+
+### Build errors
+
+```bash
+# Clean and rebuild
+cd android
+./gradlew clean
+cd ..
+npm run build
+npx cap sync android
+```
+
+---
+
+## License
+
+MIT License - see LICENSE file for details.
+
+---
+
+## Credits
+
+- **Komodo API**: [Komodo Team](https://komo.do)
+- **App Development**: [Chiranjeevi G (Morpheuslord)](https://github.com/morpheuslord)
