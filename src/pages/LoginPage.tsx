@@ -17,6 +17,7 @@ import {
   Loader2,
   AlertCircle,
 } from 'lucide-react';
+import komodoLogo from '@/assets/komodo-logo.png';
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -68,16 +69,19 @@ export default function LoginPage() {
     <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
       <Card className="w-full max-w-md border-2 border-foreground shadow-md">
         <CardHeader className="space-y-4 text-center pb-2">
-          <div className="mx-auto w-16 h-16 border-2 border-foreground flex items-center justify-center bg-primary">
-            <Server className="w-8 h-8 text-primary-foreground" />
+          <div className="mx-auto w-20 h-20 flex items-center justify-center">
+            <img src={komodoLogo} alt="Komodo" className="w-20 h-20 object-contain" />
           </div>
           <div>
             <CardTitle className="text-2xl font-bold tracking-tight">
-              KOMO.DO
+              KOMODO
             </CardTitle>
             <CardDescription className="text-muted-foreground font-mono text-sm mt-1">
               Server Management Console
             </CardDescription>
+            <p className="text-xs text-muted-foreground mt-2 font-mono">
+              API by Komodo Team • App by Morpheuslord
+            </p>
           </div>
         </CardHeader>
 

@@ -34,6 +34,7 @@ import type {
   RepoListItem
 } from '@/lib/komodo-api';
 import { useToast } from '@/hooks/use-toast';
+import komodoLogo from '@/assets/komodo-logo.png';
 
 type ResourceType = 'stacks' | 'deployments' | 'servers' | 'builds' | 'repos';
 
@@ -716,13 +717,10 @@ export default function Dashboard() {
       <header className="border-b-2 border-foreground bg-card sticky top-0 z-10">
         <div className="flex items-center justify-between p-4">
           <div className="flex items-center gap-3">
-            <div className="p-2 border-2 border-foreground bg-primary">
-              <Server className="w-5 h-5 text-primary-foreground" />
-            </div>
+            <img src={komodoLogo} alt="Komodo" className="w-10 h-10 object-contain" />
             <div>
-              <h1 className="font-bold text-lg tracking-tight">KOMO.DO</h1>
+              <h1 className="font-bold text-lg tracking-tight">KOMODO</h1>
               <p className="font-mono text-xs text-muted-foreground truncate max-w-[200px]">
-                {/* credentials.apiUrl may be undefined if you changed credential model — display host if available */}
                 {(credentials as any)?.apiUrl ?? `${(credentials as any)?.protocol}://${(credentials as any)?.host}:${(credentials as any)?.port}`}
               </p>
             </div>
