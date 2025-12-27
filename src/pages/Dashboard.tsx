@@ -753,15 +753,30 @@ export default function Dashboard() {
           <TabsList className="w-full grid grid-cols-5 border-2 border-foreground h-auto p-0 bg-secondary">
             {(Object.keys(tabConfig) as ResourceType[]).map((key) => (
               <TabsTrigger
-                key={key}
-                value={key}
-                className="flex flex-col items-center gap-1 py-3 font-mono text-xs data-[state=active]:bg-primary data-[state=active]:text-primary-foreground border-r-2 border-foreground last:border-r-0"
-              >
+                    key={key}
+                    value={key}
+                    className="
+                      group
+                      flex flex-col items-center gap-1 py-3 font-mono text-xs
+                      border-r-2 border-foreground last:border-r-0
+                      data-[state=active]:bg-primary
+                      data-[state=active]:text-primary-foreground
+                    "
+                  >
                 {tabConfig[key].icon}
                 <span className="hidden sm:inline">{tabConfig[key].label}</span>
-                <Badge variant="outline" className="text-[10px] px-1 py-0">
-                  {resources[key].length}
-                </Badge>
+                <Badge
+                className="
+                  text-[10px] px-1 py-0
+                  border-foreground
+                  group-data-[state=active]:bg-primary-foreground
+                  group-data-[state=active]:text-primary
+                  group-data-[state=active]:border-primary-foreground
+                "
+                variant="outline"
+              >
+                {resources[key].length}
+              </Badge>
               </TabsTrigger>
             ))}
           </TabsList>
