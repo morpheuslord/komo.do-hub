@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/components/ThemeProvider';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -11,20 +12,14 @@ import {
   Box,
   Hammer,
   GitBranch,
-  Settings,
   LogOut,
   RefreshCw,
   Play,
-  Square,
-  RotateCcw,
-  AlertCircle,
-  CheckCircle2,
-  Clock,
   Loader2,
-  Cpu,
-  HardDrive,
-  Trash2,
-  Pause
+  CheckCircle2,
+  AlertCircle,
+  Clock,
+  Square
 } from 'lucide-react';
 import type {
   StackListItem,
@@ -35,15 +30,37 @@ import type {
 } from '@/lib/komodo-api';
 import { useToast } from '@/hooks/use-toast';
 import komodoLogo from '@/assets/komodo-logo.png';
+import { ServerDetailPanel } from '@/components/ServerDetailPanel';
+import { ContainerDetailPanel } from '@/components/ContainerDetailPanel';
+import { StackDetailCard } from '@/components/StackDetailCard';
+import { SettingsSheet } from '@/components/SettingsSheet';
 
 type ResourceType = 'stacks' | 'deployments' | 'servers' | 'builds' | 'repos';
 
+interface ExtendedStackItem extends StackListItem {
+  containers?: Array<{ id: string; name: string; state?: string }>;
+  serverName?: string;
+}
+
+interface ContainerItem {
+  id: string;
+  name: string;
+  state?: string;
+  serverName?: string;
+  serverId?: string;
+  stats?: string;
+  image?: string;
+  deploymentId?: string;
+}
+
 interface ResourceState {
-  stacks: StackListItem[];
-  deployments: DeploymentListItem[]; // we'll use this to show containers (runtime) as well
+  stacks: ExtendedStackItem[];
+  deployments: ContainerItem[];
   servers: ServerListItem[];
   builds: BuildListItem[];
   repos: RepoListItem[];
+  containersByServer: Record<string, ContainerItem[]>;
+  deploymentMap: Record<string, string>; // container name -> deployment id
 }
 
 function getStatusIcon(state?: string) {
@@ -85,6 +102,7 @@ function getStatusVariant(state?: string): "default" | "secondary" | "destructiv
 
 export default function Dashboard() {
   const { client, credentials, logout } = useAuth();
+  const { isDark, setTheme } = useTheme();
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState<ResourceType>('stacks');
   const [isLoading, setIsLoading] = useState(true);
@@ -96,31 +114,23 @@ export default function Dashboard() {
     servers: [],
     builds: [],
     repos: [],
+    containersByServer: {},
+    deploymentMap: {},
   });
-
-  // Extended container type with server affiliation and stats
-  interface ContainerItem {
-    id: string;
-    name: string;
-    state?: string;
-    serverName?: string;
-    serverId?: string;
-    stats?: string; // e.g. "Up 2 hours" or CPU/memory
-  }
 
   // Dummy data for bypass/dev mode
   const dummyData: ResourceState = {
     stacks: [
-      { id: 'stack-1', name: 'production-web', state: 'running', tags: ['v1.2.3', 'stable'] },
-      { id: 'stack-2', name: 'staging-api', state: 'running', tags: ['v2.0.0-beta'] },
-      { id: 'stack-3', name: 'dev-microservices', state: 'stopped', tags: ['dev'] },
+      { id: 'stack-1', name: 'production-web', state: 'running', tags: ['v1.2.3', 'stable'], containers: [{ id: 'c1', name: 'nginx', state: 'running' }, { id: 'c2', name: 'api', state: 'running' }], serverName: 'prod-node-01' },
+      { id: 'stack-2', name: 'staging-api', state: 'running', tags: ['v2.0.0-beta'], containers: [{ id: 'c3', name: 'redis', state: 'running' }], serverName: 'staging-node-01' },
+      { id: 'stack-3', name: 'dev-microservices', state: 'stopped', tags: ['dev'], containers: [], serverName: 'staging-node-01' },
     ],
     deployments: [
-      { id: 'deploy-1', name: 'nginx-proxy', state: 'running', serverName: 'prod-node-01', stats: 'Up 3 days' },
-      { id: 'deploy-2', name: 'postgres-db', state: 'running', serverName: 'prod-node-01', stats: 'Up 3 days' },
-      { id: 'deploy-3', name: 'redis-cache', state: 'running', serverName: 'prod-node-02', stats: 'Up 1 day' },
-      { id: 'deploy-4', name: 'api-gateway', state: 'pending', serverName: 'staging-node-01', stats: 'Starting...' },
-      { id: 'deploy-5', name: 'worker-queue', state: 'stopped', serverName: 'staging-node-01', stats: 'Exited (0)' },
+      { id: 'deploy-1', name: 'nginx-proxy', state: 'running', serverName: 'prod-node-01', stats: 'Up 3 days', image: 'nginx:latest', deploymentId: 'deploy-1' },
+      { id: 'deploy-2', name: 'postgres-db', state: 'running', serverName: 'prod-node-01', stats: 'Up 3 days', image: 'postgres:15', deploymentId: 'deploy-2' },
+      { id: 'deploy-3', name: 'redis-cache', state: 'running', serverName: 'prod-node-02', stats: 'Up 1 day', image: 'redis:alpine', deploymentId: 'deploy-3' },
+      { id: 'deploy-4', name: 'api-gateway', state: 'pending', serverName: 'staging-node-01', stats: 'Starting...', image: 'api:v2', deploymentId: 'deploy-4' },
+      { id: 'deploy-5', name: 'worker-queue', state: 'stopped', serverName: 'staging-node-01', stats: 'Exited (0)', image: 'worker:latest', deploymentId: 'deploy-5' },
     ],
     servers: [
       { id: 'server-1', name: 'prod-node-01', state: 'healthy', address: '192.168.1.10', cpu_perc: 45.2, mem_used_gb: 12.4, mem_total_gb: 32, disk_used_gb: 180, disk_total_gb: 500 },
@@ -136,23 +146,25 @@ export default function Dashboard() {
       { id: 'repo-1', name: 'main-monorepo', state: 'ok' },
       { id: 'repo-2', name: 'infra-config', state: 'ok' },
     ],
+    containersByServer: {
+      'server-1': [
+        { id: 'c1', name: 'nginx-proxy', state: 'running', serverName: 'prod-node-01' },
+        { id: 'c2', name: 'postgres-db', state: 'running', serverName: 'prod-node-01' },
+      ],
+      'server-2': [
+        { id: 'c3', name: 'redis-cache', state: 'running', serverName: 'prod-node-02' },
+      ],
+      'server-3': [
+        { id: 'c4', name: 'api-gateway', state: 'pending', serverName: 'staging-node-01' },
+        { id: 'c5', name: 'worker-queue', state: 'stopped', serverName: 'staging-node-01' },
+      ],
+    },
+    deploymentMap: {},
   };
 
   const isBypassMode = localStorage.getItem('komodo_bypass') === 'true';
 
-  /**
-   * fetchResources:
-   * - ListServers
-   * - For each server: call GetServerState (or GetServer) to retrieve health state
-   * - For each server: call ListDockerContainers to list running containers; combine into deployments array
-   *
-   * Notes:
-   * - `ListDockerContainers` and `GetServerState` are read operations present in the Komodo client API (docs).
-   * - We convert container objects to a minimal shape that the UI expects: { id, name, state }.
-   *
-   * See Komodo client docs for available read types: GetServerState / ListDockerContainers. :contentReference[oaicite:1]{index=1}
-   */
-  const fetchResources = async (showRefresh = false) => {
+  const fetchResources = useCallback(async (showRefresh = false) => {
     if (isBypassMode) {
       if (showRefresh) setIsRefreshing(true);
       else setIsLoading(true);
@@ -180,31 +192,37 @@ export default function Dashboard() {
       ]);
 
       const serversList: ServerListItem[] = serversRes.data ?? [];
+      const deploymentsList: DeploymentListItem[] = deploymentsRes.data ?? [];
+      
+      // Create deployment name -> id mapping
+      const deploymentMap: Record<string, string> = {};
+      deploymentsList.forEach((d) => {
+        if (d.name && d.id) {
+          deploymentMap[d.name.toLowerCase()] = d.id;
+        }
+      });
 
-      // 2) For each server, fetch runtime state and docker containers.
-      //    We parallelize but keep it bounded if you have many servers (here simple Promise.all).
+      // 2) For each server, fetch runtime state and docker containers
+      const containersByServer: Record<string, ContainerItem[]> = {};
+      
       const perServerPromises = serversList.map(async (srv) => {
-        // default values
         let runtimeState: string | undefined = srv.state ?? srv.status;
         let containers: ContainerItem[] = [];
 
         try {
-          // Get server state (GetServerState / GetServer)
-          // some komodo versions may return `GetServer` or `GetServerState` — both are listed in docs.
           const stateRes = await client.read<any>('GetServerState', { server: srv.id }).catch(() =>
             client.read<any>('GetServer', { server: srv.id }).catch(() => ({ success: false, data: undefined }))
           );
 
           if (stateRes?.success && 'data' in stateRes && stateRes.data) {
-            // pick common fields if present
             runtimeState =
               stateRes.data?.health ?? stateRes.data?.status ?? stateRes.data?.state ?? runtimeState;
           }
-        } catch (err) {
-          // ignore and leave runtimeState as-is
+        } catch {
+          // ignore
         }
 
-        // Fetch system stats (CPU, memory, disk)
+        // Fetch system stats
         let cpu_perc: number | undefined;
         let mem_used_gb: number | undefined;
         let mem_total_gb: number | undefined;
@@ -221,13 +239,11 @@ export default function Dashboard() {
             disk_used_gb = stats.disk_used_gb ?? (stats.disk_used ? stats.disk_used / 1024 / 1024 / 1024 : undefined);
             disk_total_gb = stats.disk_total_gb ?? (stats.disk_total ? stats.disk_total / 1024 / 1024 / 1024 : undefined);
           }
-        } catch (err) {
-          // ignore stats fetch failure
+        } catch {
+          // ignore
         }
 
         try {
-          // List running docker containers on that server
-          // ListDockerContainers is a documented read op in the Komodo client API.
           const listContainersRes = await client.read<any[]>('ListDockerContainers', {
             server: srv.id,
           }).catch(() => ({ success: false, data: undefined }));
@@ -235,27 +251,38 @@ export default function Dashboard() {
           const containerItems = ('data' in listContainersRes && listContainersRes.data) ? listContainersRes.data : [];
 
           containers = (containerItems || []).map((c: any) => {
-            // c shape can vary; tolerate different keys:
             const id = c?.Id ?? c?.id ?? c?.container_id ?? '';
-            // Extract clean container name (remove leading slash if present)
             let rawName =
               (Array.isArray(c?.Names) && c.Names[0]) ||
               c?.Name ||
               c?.name ||
               c?.Names?.[0] ||
               '';
-            // Docker names often start with "/" - strip it
             const name = rawName.replace(/^\//, '') || c?.Image?.split(':')[0] || id.slice(0, 12);
             const state = c?.State ?? c?.Status ?? c?.state ?? 'unknown';
-            // Extract uptime/stats from Status field (e.g., "Up 3 hours")
             const stats = c?.Status ?? c?.status ?? '';
-            return { id, name, state, serverName: srv.name, serverId: srv.id, stats };
+            const image = c?.Image ?? c?.image ?? '';
+            
+            // Find matching deployment ID by name
+            const deploymentId = deploymentMap[name.toLowerCase()];
+            
+            return { 
+              id, 
+              name, 
+              state, 
+              serverName: srv.name, 
+              serverId: srv.id, 
+              stats,
+              image,
+              deploymentId 
+            };
           });
-        } catch (err) {
-          // ignore per-server container failures
+          
+          containersByServer[srv.id] = containers;
+        } catch {
+          // ignore
         }
 
-        // return augmented server info + containers + stats
         return {
           server: {
             ...srv,
@@ -272,30 +299,48 @@ export default function Dashboard() {
 
       const perServerResults = await Promise.all(perServerPromises);
 
-      // Compose final arrays:
       const updatedServers = perServerResults.map((r) => r.server);
-      // Flatten containers from all servers into deployments (so the "Containers" tab shows them)
       const allContainersFlat = perServerResults.flatMap((r) =>
         (r.containers || []).map((c) => ({
-          id: c.id,
-          name: c.name,
-          state: c.state,
-          serverName: c.serverName,
-          serverId: c.serverId,
-          stats: c.stats,
+          ...c,
         }))
       );
 
+      // Create server name lookup
+      const serverNameById: Record<string, string> = {};
+      updatedServers.forEach((s) => {
+        serverNameById[s.id] = s.name;
+      });
+
+      // Enhance stacks with container info and server name
+      const stacksList = stacksRes.data || [];
+      const enhancedStacks: ExtendedStackItem[] = stacksList.map((stack) => {
+        // Find containers that might belong to this stack (by name prefix matching)
+        const stackContainers = allContainersFlat.filter((c) => 
+          c.name.toLowerCase().includes(stack.name.toLowerCase().replace(/-/g, '_')) ||
+          c.name.toLowerCase().includes(stack.name.toLowerCase())
+        );
+        
+        const serverName = stack.server_id ? serverNameById[stack.server_id] : 
+          (stackContainers.length > 0 ? stackContainers[0].serverName : undefined);
+        
+        return {
+          ...stack,
+          containers: stackContainers.map((c) => ({ id: c.id, name: c.name, state: c.state })),
+          serverName,
+        };
+      });
+
       setResources({
-        stacks: stacksRes.data || [],
-        // keep deployment definitions (ListDeployments) AND also show runtime containers in the "deployments" tab
-        // You can combine both or prefer runtime containers; here we show containers if any exist, otherwise the definitions.
+        stacks: enhancedStacks,
         deployments: allContainersFlat.length > 0
-          ? (allContainersFlat as unknown as DeploymentListItem[])
-          : (deploymentsRes.data || []),
+          ? allContainersFlat
+          : (deploymentsList as unknown as ContainerItem[]),
         servers: updatedServers,
         builds: buildsRes.data || [],
         repos: reposRes.data || [],
+        containersByServer,
+        deploymentMap,
       });
     } catch (error) {
       toast({
@@ -307,12 +352,11 @@ export default function Dashboard() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  };
+  }, [client, isBypassMode, toast]);
 
   useEffect(() => {
     fetchResources();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client]);
+  }, [fetchResources]);
 
   const handleAction = async (action: string, resourceType: string, resourceId: string, resourceName: string) => {
     if (!client) return;
@@ -321,11 +365,18 @@ export default function Dashboard() {
 
     try {
       let result;
-      const params = { [resourceType.toLowerCase().replace(/s$/, '')]: resourceId };
+      
+      // For container actions, we need to use deployment parameter
+      const isContainerAction = ['start', 'stop', 'restart'].includes(action) && 
+        (resourceType === 'deployments' || resourceType.toLowerCase().includes('container'));
+      
+      const params = isContainerAction 
+        ? { deployment: resourceId }
+        : { [resourceType.toLowerCase().replace(/s$/, '')]: resourceId };
 
       switch (action) {
         case 'deploy':
-          result = await client.execute('DeployStack', params);
+          result = await client.execute('DeployStack', { stack: resourceId });
           break;
         case 'start':
           result = await client.execute('StartDeployment', params);
@@ -345,7 +396,6 @@ export default function Dashboard() {
         case 'pull':
           result = await client.execute('PullRepo', params);
           break;
-        // Server management actions
         case 'startAll':
           result = await client.execute('StartAllContainers', { server: resourceId });
           break;
@@ -389,111 +439,28 @@ export default function Dashboard() {
     }
   };
 
-  // Render container card with: Primary=name, Secondary=stats, Tertiary=server
-  const renderContainerCard = (
-    container: { id: string; name: string; state?: string; serverName?: string; stats?: string },
-    actions: { label: string; action: string; icon: React.ReactNode }[]
-  ) => (
-    <Card key={container.id} className="border-2 border-foreground shadow-xs hover:shadow-sm transition-shadow">
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0 flex-1">
-            <div className="p-2 border-2 border-foreground bg-secondary flex-shrink-0">
-              <Box className="w-5 h-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <h3 className="font-mono font-bold text-sm truncate">{container.name}</h3>
-              {container.stats && (
-                <p className="font-mono text-xs text-muted-foreground truncate">{container.stats}</p>
-              )}
-              <div className="flex items-center gap-2 mt-1 flex-wrap">
-                {getStatusIcon(container.state)}
-                <Badge variant={getStatusVariant(container.state)} className="font-mono text-xs uppercase">
-                  {container.state || 'unknown'}
-                </Badge>
-                {container.serverName && (
-                  <Badge variant="outline" className="font-mono text-xs">
-                    <Server className="w-3 h-3 mr-1" />
-                    {container.serverName}
-                  </Badge>
-                )}
-              </div>
-            </div>
-          </div>
-          <div className="flex gap-1 flex-shrink-0">
-            {actions.map((act) => (
-              <Button
-                key={act.action}
-                variant="outline"
-                size="icon"
-                className="h-8 w-8 border-2"
-                onClick={() => handleAction(act.action, 'deployments', container.id, container.name)}
-                disabled={actionLoading === `${act.action}-${container.id}`}
-                title={act.label}
-              >
-                {actionLoading === `${act.action}-${container.id}` ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  act.icon
-                )}
-              </Button>
-            ))}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
+  const handleContainerAction = (action: string, containerId: string, containerName: string) => {
+    // Try to find deployment ID from the map first
+    const container = resources.deployments.find((c) => c.id === containerId);
+    const deploymentId = container?.deploymentId || resources.deploymentMap[containerName.toLowerCase()];
+    
+    if (deploymentId) {
+      handleAction(action, 'deployments', deploymentId, containerName);
+    } else {
+      // Fallback to container ID (this may fail for some actions)
+      toast({
+        title: 'Warning',
+        description: `No deployment found for ${containerName}. Using container ID.`,
+      });
+      handleAction(action, 'deployments', containerId, containerName);
+    }
+  };
 
-  // Render stack card with tags displayed
-  const renderStackCard = (
-    stack: { id: string; name: string; state?: string; tags?: string[] },
-    actions: { label: string; action: string; icon: React.ReactNode }[]
-  ) => (
-    <Card key={stack.id} className="border-2 border-foreground shadow-xs hover:shadow-sm transition-shadow">
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-3 min-w-0 flex-1">
-            <div className="p-2 border-2 border-foreground bg-secondary flex-shrink-0">
-              <Layers className="w-5 h-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <h3 className="font-mono font-bold text-sm truncate">{stack.name}</h3>
-              <div className="flex items-center gap-2 mt-1 flex-wrap">
-                {getStatusIcon(stack.state)}
-                <Badge variant={getStatusVariant(stack.state)} className="font-mono text-xs uppercase">
-                  {stack.state || 'unknown'}
-                </Badge>
-                {stack.tags && stack.tags.length > 0 && stack.tags.map((tag, idx) => (
-                  <Badge key={idx} variant="outline" className="font-mono text-xs">
-                    {tag}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          </div>
-          <div className="flex gap-1 flex-shrink-0">
-            {actions.map((act) => (
-              <Button
-                key={act.action}
-                variant="outline"
-                size="icon"
-                className="h-8 w-8 border-2"
-                onClick={() => handleAction(act.action, 'stacks', stack.id, stack.name)}
-                disabled={actionLoading === `${act.action}-${stack.id}`}
-                title={act.label}
-              >
-                {actionLoading === `${act.action}-${stack.id}` ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  act.icon
-                )}
-              </Button>
-            ))}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
+  const handleRefreshServer = useCallback((serverId: string) => {
+    // In a real implementation, this would fetch just that server's data
+    // For now, we trigger a full refresh
+    fetchResources(true);
+  }, [fetchResources]);
 
   const renderResourceCard = (
     resource: { id: string; name: string; state?: string; status?: string },
@@ -542,119 +509,6 @@ export default function Dashboard() {
     </Card>
   );
 
-  // Render server card with stats and management controls
-  const renderServerCard = (
-    server: ServerListItem,
-    actions: { label: string; action: string; icon: React.ReactNode }[]
-  ) => {
-    const cpuPercent = server.cpu_perc ?? 0;
-    const memUsed = server.mem_used_gb ?? 0;
-    const memTotal = server.mem_total_gb ?? 1;
-    const diskUsed = server.disk_used_gb ?? 0;
-    const diskTotal = server.disk_total_gb ?? 1;
-    const memPercent = memTotal > 0 ? (memUsed / memTotal) * 100 : 0;
-    const diskPercent = diskTotal > 0 ? (diskUsed / diskTotal) * 100 : 0;
-
-    return (
-      <Card key={server.id} className="border-2 border-foreground shadow-xs hover:shadow-sm transition-shadow">
-        <CardContent className="p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0 flex-1">
-              <div className="p-2 border-2 border-foreground bg-secondary flex-shrink-0">
-                <Server className="w-5 h-5" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <h3 className="font-mono font-bold text-sm truncate">{server.name}</h3>
-                {server.address && (
-                  <p className="font-mono text-xs text-muted-foreground truncate">{server.address}</p>
-                )}
-                <div className="flex items-center gap-2 mt-1">
-                  {getStatusIcon(server.state)}
-                  <Badge variant={getStatusVariant(server.state)} className="font-mono text-xs uppercase">
-                    {server.state || 'unknown'}
-                  </Badge>
-                </div>
-              </div>
-            </div>
-            <div className="flex gap-1 flex-shrink-0">
-              {actions.map((act) => (
-                <Button
-                  key={act.action}
-                  variant="outline"
-                  size="icon"
-                  className="h-8 w-8 border-2"
-                  onClick={() => handleAction(act.action, 'servers', server.id, server.name)}
-                  disabled={actionLoading === `${act.action}-${server.id}`}
-                  title={act.label}
-                >
-                  {actionLoading === `${act.action}-${server.id}` ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    act.icon
-                  )}
-                </Button>
-              ))}
-            </div>
-          </div>
-          
-          {/* Stats Section */}
-          <div className="mt-4 space-y-2">
-            {/* CPU */}
-            <div className="flex items-center gap-2">
-              <Cpu className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-              <div className="flex-1">
-                <div className="flex justify-between text-xs font-mono mb-1">
-                  <span>CPU</span>
-                  <span>{cpuPercent.toFixed(1)}%</span>
-                </div>
-                <div className="h-2 bg-secondary border border-foreground">
-                  <div
-                    className="h-full bg-primary transition-all"
-                    style={{ width: `${Math.min(cpuPercent, 100)}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-            
-            {/* Memory */}
-            <div className="flex items-center gap-2">
-              <Box className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-              <div className="flex-1">
-                <div className="flex justify-between text-xs font-mono mb-1">
-                  <span>RAM</span>
-                  <span>{memUsed.toFixed(1)} / {memTotal.toFixed(1)} GB</span>
-                </div>
-                <div className="h-2 bg-secondary border border-foreground">
-                  <div
-                    className="h-full bg-chart-2 transition-all"
-                    style={{ width: `${Math.min(memPercent, 100)}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-            
-            {/* Disk */}
-            <div className="flex items-center gap-2">
-              <HardDrive className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-              <div className="flex-1">
-                <div className="flex justify-between text-xs font-mono mb-1">
-                  <span>Disk</span>
-                  <span>{diskUsed.toFixed(1)} / {diskTotal.toFixed(1)} GB</span>
-                </div>
-                <div className="h-2 bg-secondary border border-foreground">
-                  <div
-                    className="h-full bg-chart-4 transition-all"
-                    style={{ width: `${Math.min(diskPercent, 100)}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    );
-  };
-
   const tabConfig = {
     stacks: {
       icon: <Layers className="w-4 h-4" />,
@@ -666,22 +520,13 @@ export default function Dashboard() {
       icon: <Box className="w-4 h-4" />,
       label: 'Containers',
       resourceIcon: <Box className="w-5 h-5" />,
-      actions: [
-        { label: 'Start', action: 'start', icon: <Play className="h-4 w-4" /> },
-        { label: 'Stop', action: 'stop', icon: <Square className="h-4 w-4" /> },
-        { label: 'Restart', action: 'restart', icon: <RotateCcw className="h-4 w-4" /> },
-      ],
+      actions: [],
     },
     servers: {
       icon: <Server className="w-4 h-4" />,
       label: 'Servers',
       resourceIcon: <Server className="w-5 h-5" />,
-      actions: [
-        { label: 'Start All', action: 'startAll', icon: <Play className="h-4 w-4" /> },
-        { label: 'Stop All', action: 'stopAll', icon: <Square className="h-4 w-4" /> },
-        { label: 'Restart All', action: 'restartAll', icon: <RotateCcw className="h-4 w-4" /> },
-        { label: 'Prune', action: 'pruneSystem', icon: <Trash2 className="h-4 w-4" /> },
-      ],
+      actions: [],
     },
     builds: {
       icon: <Hammer className="w-4 h-4" />,
@@ -735,6 +580,10 @@ export default function Dashboard() {
             >
               <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
             </Button>
+            <SettingsSheet
+              isDarkMode={isDark}
+              onThemeChange={(dark) => setTheme(dark ? 'dark' : 'light')}
+            />
             <Button
               variant="outline"
               size="icon"
@@ -781,44 +630,155 @@ export default function Dashboard() {
             ))}
           </TabsList>
 
-          {(Object.keys(tabConfig) as ResourceType[]).map((key) => (
-            <TabsContent key={key} value={key} className="mt-4">
-              <ScrollArea className="h-[calc(100vh-220px)]">
-                <div className="space-y-3 pr-2">
-                  {resources[key].length === 0 ? (
-                    <Card className="border-2 border-dashed border-muted-foreground">
-                      <CardContent className="p-8 text-center">
-                        <div className="mx-auto w-12 h-12 border-2 border-muted-foreground flex items-center justify-center mb-4">
-                          {tabConfig[key].resourceIcon}
-                        </div>
-                        <p className="font-mono text-sm text-muted-foreground">
-                          No {tabConfig[key].label.toLowerCase()} found
-                        </p>
-                      </CardContent>
-                    </Card>
-                  ) : (
-                    resources[key].map((resource: any) => {
-                      if (key === 'stacks') {
-                        return renderStackCard(resource, tabConfig[key].actions);
-                      }
-                      if (key === 'deployments') {
-                        return renderContainerCard(resource, tabConfig[key].actions);
-                      }
-                      if (key === 'servers') {
-                        return renderServerCard(resource, tabConfig[key].actions);
-                      }
-                      return renderResourceCard(
-                        resource,
-                        key,
-                        tabConfig[key].resourceIcon,
-                        tabConfig[key].actions
-                      );
-                    })
-                  )}
-                </div>
-              </ScrollArea>
-            </TabsContent>
-          ))}
+          {/* Stacks Tab */}
+          <TabsContent value="stacks" className="mt-4">
+            <ScrollArea className="h-[calc(100vh-220px)]">
+              <div className="space-y-3 pr-2">
+                {resources.stacks.length === 0 ? (
+                  <Card className="border-2 border-dashed border-muted-foreground">
+                    <CardContent className="p-8 text-center">
+                      <div className="mx-auto w-12 h-12 border-2 border-muted-foreground flex items-center justify-center mb-4">
+                        <Layers className="w-5 h-5" />
+                      </div>
+                      <p className="font-mono text-sm text-muted-foreground">
+                        No stacks found
+                      </p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  resources.stacks.map((stack) => (
+                    <StackDetailCard
+                      key={stack.id}
+                      stack={stack}
+                      serverName={stack.serverName}
+                      containers={stack.containers || []}
+                      onAction={(action, id, name) => handleAction(action, 'stacks', id, name)}
+                      actionLoading={actionLoading}
+                    />
+                  ))
+                )}
+              </div>
+            </ScrollArea>
+          </TabsContent>
+
+          {/* Containers Tab */}
+          <TabsContent value="deployments" className="mt-4">
+            <ScrollArea className="h-[calc(100vh-220px)]">
+              <div className="space-y-3 pr-2">
+                {resources.deployments.length === 0 ? (
+                  <Card className="border-2 border-dashed border-muted-foreground">
+                    <CardContent className="p-8 text-center">
+                      <div className="mx-auto w-12 h-12 border-2 border-muted-foreground flex items-center justify-center mb-4">
+                        <Box className="w-5 h-5" />
+                      </div>
+                      <p className="font-mono text-sm text-muted-foreground">
+                        No containers found
+                      </p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  resources.deployments.map((container) => (
+                    <ContainerDetailPanel
+                      key={container.id}
+                      container={container}
+                      onAction={handleContainerAction}
+                      actionLoading={actionLoading}
+                      deploymentId={container.deploymentId}
+                    />
+                  ))
+                )}
+              </div>
+            </ScrollArea>
+          </TabsContent>
+
+          {/* Servers Tab */}
+          <TabsContent value="servers" className="mt-4">
+            <ScrollArea className="h-[calc(100vh-220px)]">
+              <div className="space-y-3 pr-2">
+                {resources.servers.length === 0 ? (
+                  <Card className="border-2 border-dashed border-muted-foreground">
+                    <CardContent className="p-8 text-center">
+                      <div className="mx-auto w-12 h-12 border-2 border-muted-foreground flex items-center justify-center mb-4">
+                        <Server className="w-5 h-5" />
+                      </div>
+                      <p className="font-mono text-sm text-muted-foreground">
+                        No servers found
+                      </p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  resources.servers.map((server) => (
+                    <ServerDetailPanel
+                      key={server.id}
+                      server={server}
+                      containers={resources.containersByServer[server.id] || []}
+                      onAction={(action, id, name) => handleAction(action, 'servers', id, name)}
+                      actionLoading={actionLoading}
+                      onRefreshServer={handleRefreshServer}
+                    />
+                  ))
+                )}
+              </div>
+            </ScrollArea>
+          </TabsContent>
+
+          {/* Builds Tab */}
+          <TabsContent value="builds" className="mt-4">
+            <ScrollArea className="h-[calc(100vh-220px)]">
+              <div className="space-y-3 pr-2">
+                {resources.builds.length === 0 ? (
+                  <Card className="border-2 border-dashed border-muted-foreground">
+                    <CardContent className="p-8 text-center">
+                      <div className="mx-auto w-12 h-12 border-2 border-muted-foreground flex items-center justify-center mb-4">
+                        <Hammer className="w-5 h-5" />
+                      </div>
+                      <p className="font-mono text-sm text-muted-foreground">
+                        No builds found
+                      </p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  resources.builds.map((build) =>
+                    renderResourceCard(
+                      build,
+                      'builds',
+                      tabConfig.builds.resourceIcon,
+                      tabConfig.builds.actions
+                    )
+                  )
+                )}
+              </div>
+            </ScrollArea>
+          </TabsContent>
+
+          {/* Repos Tab */}
+          <TabsContent value="repos" className="mt-4">
+            <ScrollArea className="h-[calc(100vh-220px)]">
+              <div className="space-y-3 pr-2">
+                {resources.repos.length === 0 ? (
+                  <Card className="border-2 border-dashed border-muted-foreground">
+                    <CardContent className="p-8 text-center">
+                      <div className="mx-auto w-12 h-12 border-2 border-muted-foreground flex items-center justify-center mb-4">
+                        <GitBranch className="w-5 h-5" />
+                      </div>
+                      <p className="font-mono text-sm text-muted-foreground">
+                        No repos found
+                      </p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  resources.repos.map((repo) =>
+                    renderResourceCard(
+                      repo,
+                      'repos',
+                      tabConfig.repos.resourceIcon,
+                      tabConfig.repos.actions
+                    )
+                  )
+                )}
+              </div>
+            </ScrollArea>
+          </TabsContent>
         </Tabs>
       </main>
 
@@ -830,7 +790,6 @@ export default function Dashboard() {
             <span>{resources.stacks.length} stacks</span>
             <span>{resources.deployments.length} containers</span>
           </div>
-          <Settings className="w-4 h-4 text-muted-foreground" />
         </div>
       </footer>
     </div>
