@@ -32,18 +32,17 @@ interface ContainerDetailPanelProps {
   };
   onAction: (action: string, resourceId: string, resourceName: string) => void;
   actionLoading: string | null;
-  deploymentId?: string; // The actual deployment ID if available
 }
 
 function getStatusIcon(state?: string) {
   const stateStr = state?.toLowerCase() || '';
-  if (['running', 'ok', 'healthy', 'up'].some(s => stateStr.includes(s))) {
+  if (['running', 'ok', 'healthy', 'up'].some((s) => stateStr.includes(s))) {
     return <div className="w-2 h-2 rounded-full bg-chart-2" />;
   }
-  if (['error', 'failed', 'unhealthy', 'dead'].some(s => stateStr.includes(s))) {
+  if (['error', 'failed', 'unhealthy', 'dead'].some((s) => stateStr.includes(s))) {
     return <div className="w-2 h-2 rounded-full bg-destructive" />;
   }
-  if (['stopped', 'exited'].some(s => stateStr.includes(s))) {
+  if (['stopped', 'exited'].some((s) => stateStr.includes(s))) {
     return <div className="w-2 h-2 rounded-full bg-muted-foreground" />;
   }
   return <div className="w-2 h-2 rounded-full bg-chart-4" />;
@@ -51,30 +50,25 @@ function getStatusIcon(state?: string) {
 
 function getStatusVariant(state?: string): "default" | "secondary" | "destructive" | "outline" {
   const stateStr = state?.toLowerCase() || '';
-  if (['running', 'ok', 'healthy', 'up'].some(s => stateStr.includes(s))) return 'default';
-  if (['error', 'failed', 'unhealthy', 'dead'].some(s => stateStr.includes(s))) return 'destructive';
+  if (['running', 'ok', 'healthy', 'up'].some((s) => stateStr.includes(s))) return 'default';
+  if (['error', 'failed', 'unhealthy', 'dead'].some((s) => stateStr.includes(s))) return 'destructive';
   return 'secondary';
 }
 
-export function ContainerDetailPanel({ container, onAction, actionLoading, deploymentId }: ContainerDetailPanelProps) {
+export function ContainerDetailPanel({ container, onAction, actionLoading }: ContainerDetailPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [uptime, setUptime] = useState(container.stats || '');
 
-  // Parse uptime from stats if available
   useEffect(() => {
-    if (container.stats) {
-      setUptime(container.stats);
-    }
+    if (container.stats) setUptime(container.stats);
   }, [container.stats]);
-
-  // Use deploymentId if available, otherwise use container.id
-  const actionId = deploymentId || container.id;
 
   const containerActions = [
     { label: 'Start', action: 'start', icon: <Play className="h-3 w-3" /> },
     { label: 'Stop', action: 'stop', icon: <Square className="h-3 w-3" /> },
     { label: 'Restart', action: 'restart', icon: <RotateCcw className="h-3 w-3" /> },
   ];
+
 
   // Extract image name from full image path
   const imageName = container.image?.split('/').pop()?.split(':')[0] || container.image || 'Unknown';
@@ -193,11 +187,11 @@ export function ContainerDetailPanel({ container, onAction, actionLoading, deplo
                   className="border-2 font-mono text-xs"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onAction(act.action, actionId, container.name);
+                    onAction(act.action, container.id, container.name);
                   }}
-                  disabled={actionLoading === `${act.action}-${actionId}`}
+                  disabled={actionLoading === `${act.action}-${container.id}`}
                 >
-                  {actionLoading === `${act.action}-${actionId}` ? (
+                  {actionLoading === `${act.action}-${container.id}` ? (
                     <Loader2 className="h-3 w-3 animate-spin mr-1" />
                   ) : (
                     <span className="mr-1">{act.icon}</span>
