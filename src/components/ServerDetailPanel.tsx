@@ -23,6 +23,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import type { ServerListItem } from '@/lib/komodo-api';
+import { ServerStatsChart } from './ServerStatsChart';
 
 interface ServerDetailPanelProps {
   server: ServerListItem;
@@ -57,13 +58,13 @@ export function ServerDetailPanel({ server, containers, onAction, actionLoading,
   const [isOpen, setIsOpen] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(new Date());
 
-  // Auto-refresh when panel is open
+  // Auto-refresh when panel is open - every 3 seconds for charts
   useEffect(() => {
     if (!isOpen) return;
     const interval = setInterval(() => {
       setLastUpdate(new Date());
       onRefreshServer?.(server.id);
-    }, 5000); // Update every 5 seconds
+    }, 3000); // Update every 3 seconds
     return () => clearInterval(interval);
   }, [isOpen, server.id, onRefreshServer]);
 
@@ -242,6 +243,16 @@ export function ServerDetailPanel({ server, containers, onAction, actionLoading,
                 </div>
               </div>
             )}
+
+            {/* 24h Stats Chart */}
+            <ServerStatsChart
+              serverId={server.id}
+              serverName={server.name}
+              currentCpu={cpuPercent}
+              currentMemPercent={memPercent}
+              currentDiskPercent={diskPercent}
+              isVisible={isOpen}
+            />
 
             {/* Action Buttons */}
             <div className="mt-4 flex flex-wrap gap-2">
