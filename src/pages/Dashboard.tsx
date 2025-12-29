@@ -439,20 +439,65 @@ export default function Dashboard() {
     }
   };
 
-  const handleContainerAction = (action: string, containerId: string, containerName: string) => {
-    // Try to find deployment ID from the map first
+  const handleContainerAction = async (action: string, containerId: string, containerName: string) => {
+    if (!client) return;
+
     const container = resources.deployments.find((c) => c.id === containerId);
-    const deploymentId = container?.deploymentId || resources.deploymentMap[containerName.toLowerCase()];
-    
-    if (deploymentId) {
-      handleAction(action, 'deployments', deploymentId, containerName);
-    } else {
-      // Fallback to container ID (this may fail for some actions)
+    const serverId = container?.serverId;
+    const dockerContainerName = container?.name || containerName;
+
+    if (!serverId) {
       toast({
-        title: 'Warning',
-        description: `No deployment found for ${containerName}. Using container ID.`,
+        title: 'Action Failed',
+        description: 'Missing server id for this container. Refresh and try again.',
+        variant: 'destructive',
       });
-      handleAction(action, 'deployments', containerId, containerName);
+      return;
+    }
+
+    setActionLoading(`${action}-${containerId}`);
+
+    try {
+      let result;
+      const params = { server: serverId, container: dockerContainerName };
+
+      switch (action) {
+        case 'start':
+          result = await client.execute('StartContainer', params);
+          break;
+        case 'stop':
+          result = await client.execute('StopContainer', params);
+          break;
+        case 'restart':
+          result = await client.execute('RestartContainer', params);
+          break;
+        default:
+          return;
+      }
+
+      const serverError = (result as any)?.data?.error;
+
+      if (result?.success && !serverError) {
+        toast({
+          title: 'Action Started',
+          description: `${action} on ${dockerContainerName} initiated`,
+        });
+        setTimeout(() => fetchResources(true), 1500);
+      } else {
+        toast({
+          title: 'Action Failed',
+          description: serverError || result?.error || 'Unknown error',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to execute action',
+        variant: 'destructive',
+      });
+    } finally {
+      setActionLoading(null);
     }
   };
 
@@ -597,8 +642,12 @@ export default function Dashboard() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 p-4">
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ResourceType)}>
+      <main className="flex-1 p-4 flex flex-col min-h-0">
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) => setActiveTab(v as ResourceType)}
+          className="flex flex-col flex-1 min-h-0"
+        >
           <TabsList className="w-full grid grid-cols-5 border-2 border-foreground h-auto p-0 bg-secondary">
             {(Object.keys(tabConfig) as ResourceType[]).map((key) => (
               <TabsTrigger
@@ -631,8 +680,8 @@ export default function Dashboard() {
           </TabsList>
 
           {/* Stacks Tab */}
-          <TabsContent value="stacks" className="mt-4">
-            <ScrollArea className="h-[calc(100vh-220px)]">
+          <TabsContent value="stacks" className="mt-4 flex-1 min-h-0">
+            <ScrollArea className="h-full">
               <div className="space-y-3 pr-2">
                 {resources.stacks.length === 0 ? (
                   <Card className="border-2 border-dashed border-muted-foreground">
@@ -662,8 +711,8 @@ export default function Dashboard() {
           </TabsContent>
 
           {/* Containers Tab */}
-          <TabsContent value="deployments" className="mt-4">
-            <ScrollArea className="h-[calc(100vh-220px)]">
+          <TabsContent value="deployments" className="mt-4 flex-1 min-h-0">
+            <ScrollArea className="h-full">
               <div className="space-y-3 pr-2">
                 {resources.deployments.length === 0 ? (
                   <Card className="border-2 border-dashed border-muted-foreground">
@@ -683,7 +732,6 @@ export default function Dashboard() {
                       container={container}
                       onAction={handleContainerAction}
                       actionLoading={actionLoading}
-                      deploymentId={container.deploymentId}
                     />
                   ))
                 )}
@@ -692,8 +740,8 @@ export default function Dashboard() {
           </TabsContent>
 
           {/* Servers Tab */}
-          <TabsContent value="servers" className="mt-4">
-            <ScrollArea className="h-[calc(100vh-220px)]">
+          <TabsContent value="servers" className="mt-4 flex-1 min-h-0">
+            <ScrollArea className="h-full">
               <div className="space-y-3 pr-2">
                 {resources.servers.length === 0 ? (
                   <Card className="border-2 border-dashed border-muted-foreground">
@@ -723,8 +771,8 @@ export default function Dashboard() {
           </TabsContent>
 
           {/* Builds Tab */}
-          <TabsContent value="builds" className="mt-4">
-            <ScrollArea className="h-[calc(100vh-220px)]">
+          <TabsContent value="builds" className="mt-4 flex-1 min-h-0">
+            <ScrollArea className="h-full">
               <div className="space-y-3 pr-2">
                 {resources.builds.length === 0 ? (
                   <Card className="border-2 border-dashed border-muted-foreground">
@@ -752,8 +800,8 @@ export default function Dashboard() {
           </TabsContent>
 
           {/* Repos Tab */}
-          <TabsContent value="repos" className="mt-4">
-            <ScrollArea className="h-[calc(100vh-220px)]">
+          <TabsContent value="repos" className="mt-4 flex-1 min-h-0">
+            <ScrollArea className="h-full">
               <div className="space-y-3 pr-2">
                 {resources.repos.length === 0 ? (
                   <Card className="border-2 border-dashed border-muted-foreground">
