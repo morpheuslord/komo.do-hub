@@ -9,15 +9,21 @@ A mobile-first server management console for [Komodo](https://komo.do) - monitor
 ## Screenshots
 
 <p align="center">
-  <img src="public/screenshots/login.png" alt="Login Screen" width="200"/>
-  <img src="public/screenshots/stacks.png" alt="Stacks View" width="200"/>
-  <img src="public/screenshots/containers.png" alt="Containers View" width="200"/>
+  <img src="public/screenshots/white_login.png" alt="Login Screen" width="200"/>
+  <img src="public/screenshots/white_stacks.png" alt="Stacks View" width="200"/>
+  <img src="public/screenshots/white_builds.png" alt="Build View" width="200"/>
+  <img src="public/screenshots/white_server.png" alt="Server Screen" width="200"/>
+  <img src="public/screenshots/white_repos.png" alt="Repo View" width="200"/>
+  <img src="public/screenshots/white_containers.png" alt="Containers View" width="200"/>
 </p>
 
 <p align="center">
-  <img src="public/screenshots/servers.png" alt="Servers View" width="200"/>
-  <img src="public/screenshots/builds.png" alt="Builds View" width="200"/>
-  <img src="public/screenshots/repos.png" alt="Repos View" width="200"/>
+  <img src="public/screenshots/black_login.png" alt="Login Screen" width="200"/>
+  <img src="public/screenshots/black_stack.png" alt="Stacks View" width="200"/>
+  <img src="public/screenshots/black_build.png" alt="Build View" width="200"/>
+  <img src="public/screenshots/black_server.png" alt="Server Screen" width="200"/>
+  <img src="public/screenshots/black_repos.png" alt="Repo View" width="200"/>
+  <img src="public/screenshots/black_container.png" alt="Containers View" width="200"/>
 </p>
 
 ---
