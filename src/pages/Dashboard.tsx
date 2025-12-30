@@ -51,6 +51,7 @@ interface ContainerItem {
   stats?: string;
   image?: string;
   deploymentId?: string;
+  labels?: Record<string, string>; // Docker labels for stack association
 }
 
 interface ResourceState {
@@ -251,6 +252,7 @@ export default function Dashboard() {
           const containerItems = ('data' in listContainersRes && listContainersRes.data) ? listContainersRes.data : [];
 
           containers = (containerItems || []).map((c: any) => {
+            // Use full container ID for API calls
             const id = c?.Id ?? c?.id ?? c?.container_id ?? '';
             let rawName =
               (Array.isArray(c?.Names) && c.Names[0]) ||
@@ -263,6 +265,9 @@ export default function Dashboard() {
             const stats = c?.Status ?? c?.status ?? '';
             const image = c?.Image ?? c?.image ?? '';
             
+            // Capture Docker labels for stack association
+            const labels = c?.Labels ?? c?.labels ?? {};
+            
             // Find matching deployment ID by name
             const deploymentId = deploymentMap[name.toLowerCase()];
             
@@ -274,7 +279,8 @@ export default function Dashboard() {
               serverId: srv.id, 
               stats,
               image,
-              deploymentId 
+              deploymentId,
+              labels
             };
           });
           
@@ -313,13 +319,33 @@ export default function Dashboard() {
       });
 
       // Enhance stacks with container info and server name
+      // Use Docker labels for reliable association (compose project, stack name, etc.)
       const stacksList = stacksRes.data || [];
       const enhancedStacks: ExtendedStackItem[] = stacksList.map((stack) => {
-        // Find containers that might belong to this stack (by name prefix matching)
-        const stackContainers = allContainersFlat.filter((c) => 
-          c.name.toLowerCase().includes(stack.name.toLowerCase().replace(/-/g, '_')) ||
-          c.name.toLowerCase().includes(stack.name.toLowerCase())
-        );
+        const stackNameLower = stack.name.toLowerCase();
+        const stackNameNormalized = stackNameLower.replace(/-/g, '_');
+        
+        // Find containers by Docker Compose/Stack labels first, fallback to name matching
+        const stackContainers = allContainersFlat.filter((c) => {
+          const labels = (c as any).labels || {};
+          
+          // Check common Docker Compose / Swarm labels
+          const composeProject = labels['com.docker.compose.project']?.toLowerCase();
+          const stackNameLabel = labels['com.docker.stack.namespace']?.toLowerCase();
+          const komodoStack = labels['komodo.stack']?.toLowerCase();
+          
+          // Match by labels (most reliable)
+          if (composeProject === stackNameLower || composeProject === stackNameNormalized) return true;
+          if (stackNameLabel === stackNameLower || stackNameLabel === stackNameNormalized) return true;
+          if (komodoStack === stackNameLower || komodoStack === stackNameNormalized) return true;
+          
+          // Fallback: name-based matching for non-labeled containers
+          const containerNameLower = c.name.toLowerCase();
+          return containerNameLower.startsWith(stackNameLower + '_') || 
+                 containerNameLower.startsWith(stackNameLower + '-') ||
+                 containerNameLower.startsWith(stackNameNormalized + '_') ||
+                 containerNameLower.startsWith(stackNameNormalized + '-');
+        });
         
         const serverName = stack.server_id ? serverNameById[stack.server_id] : 
           (stackContainers.length > 0 ? stackContainers[0].serverName : undefined);
@@ -357,6 +383,18 @@ export default function Dashboard() {
   useEffect(() => {
     fetchResources();
   }, [fetchResources]);
+
+  // Auto-refresh stacks and containers every 3 seconds when their tabs are active
+  useEffect(() => {
+    if (isBypassMode) return; // Skip polling in bypass mode
+    if (activeTab !== 'stacks' && activeTab !== 'deployments') return;
+    
+    const interval = setInterval(() => {
+      fetchResources(true);
+    }, 3000);
+    
+    return () => clearInterval(interval);
+  }, [activeTab, fetchResources, isBypassMode]);
 
   const handleAction = async (action: string, resourceType: string, resourceId: string, resourceName: string) => {
     if (!client) return;
@@ -459,7 +497,17 @@ export default function Dashboard() {
 
     try {
       let result;
-      const params = { server: serverId, container: dockerContainerName };
+      // Use the full Docker container ID (hash) for API calls, not the name
+      const dockerContainerId = container?.id || containerId;
+      const params = { server: serverId, container: dockerContainerId };
+      
+      // Debug log for troubleshooting
+      console.log(`[Container Action] ${action}`, { 
+        serverId, 
+        containerId: dockerContainerId, 
+        containerName: dockerContainerName,
+        params 
+      });
 
       switch (action) {
         case 'start':
@@ -476,6 +524,9 @@ export default function Dashboard() {
       }
 
       const serverError = (result as any)?.data?.error;
+      
+      // Debug log for response
+      console.log(`[Container Action] ${action} response`, { result, serverError });
 
       if (result?.success && !serverError) {
         toast({
