@@ -384,17 +384,17 @@ export default function Dashboard() {
     fetchResources();
   }, [fetchResources]);
 
-  // Auto-refresh stacks and containers every 3 seconds when their tabs are active
+  // Auto-refresh ALL resources continuously every 3 seconds for smooth real-time updates
   useEffect(() => {
     if (isBypassMode) return; // Skip polling in bypass mode
-    if (activeTab !== 'stacks' && activeTab !== 'deployments') return;
     
+    // Initial fetch already done, so we start the polling immediately
     const interval = setInterval(() => {
       fetchResources(true);
     }, 3000);
     
     return () => clearInterval(interval);
-  }, [activeTab, fetchResources, isBypassMode]);
+  }, [fetchResources, isBypassMode]);
 
   const handleAction = async (action: string, resourceType: string, resourceId: string, resourceName: string) => {
     if (!client) return;
