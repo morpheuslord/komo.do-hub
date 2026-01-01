@@ -161,7 +161,7 @@ export default function Dashboard() {
       else setIsLoading(true);
 
       try {
-        // 1) List stacks, deployments (definitions), servers, builds, repos
+        // 1) List stacks, deployments, servers, builds, repos
         const [stacksRes, deploymentsRes, serversRes, buildsRes, reposRes] =
           await Promise.all([
             client.read<StackListItem[]>("ListStacks", {}),
@@ -189,7 +189,42 @@ export default function Dashboard() {
           serverNameById[s.id] = s.name;
         });
 
-        // 2) For each stack, get its full config to find server_id
+        // 2) Enhance Builds with Stats
+        const buildsWithStats = await Promise.all((buildsRes.data || []).map(async (build) => {
+          try {
+            const statsRes = await client.read<any>("GetBuildStats", { build: build.id });
+            if (statsRes?.success) {
+              return { ...build, stats: statsRes.data };
+            }
+          } catch { /* ignore */ }
+          return build;
+        }));
+
+        // 3) Enhance Deployments with Container Info & Stats
+        const enhancedDeployments = await Promise.all(deploymentsList.map(async (dep) => {
+          try {
+            // Get deployment container info
+            const containerRes = await client.read<any>("GetDeploymentContainer", { deployment: dep.id });
+            let containerInfo = containerRes?.data || {};
+            
+            // Get deployment stats
+            const statsRes = await client.read<any>("GetDeploymentStats", { deployment: dep.id });
+            const stats = statsRes?.data || {};
+
+            return {
+              ...dep,
+              containerId: containerInfo.id,
+              state: containerInfo.state || dep.state,
+              stats: stats.status || dep.status,
+              image: containerInfo.image || dep.image,
+              labels: containerInfo.labels || {}
+            };
+          } catch {
+            return dep;
+          }
+        }));
+
+        // 4) For each stack, get its full config to find server_id
         const stackDetailsPromises = stacksList.map(async (stack) => {
           try {
             const stackRes = await client.read<any>("GetStack", {
@@ -210,7 +245,7 @@ export default function Dashboard() {
 
         const stacksWithDetails = await Promise.all(stackDetailsPromises);
 
-        // 3) For each server, fetch runtime state and docker containers
+        // 5) For each server, fetch runtime state and docker containers
         const containersByServer: Record<string, ContainerItem[]> = {};
 
         const perServerPromises = serversList.map(async (srv) => {
@@ -230,116 +265,55 @@ export default function Dashboard() {
             });
             if (statsRes?.success && statsRes.data) {
               const stats = statsRes.data;
-              // Handle various API response formats
-              cpu_perc =
-                stats.cpu_perc ??
-                stats.cpu ??
-                stats.cpu_percent ??
-                stats.cpu_usage;
+              cpu_perc = stats.cpu_perc ?? stats.cpu ?? stats.cpu_percent ?? stats.cpu_usage;
 
-              // Memory - can be in GB or bytes
-              if (stats.mem_used_gb !== undefined) {
-                mem_used_gb = stats.mem_used_gb;
-              } else if (stats.mem_used !== undefined) {
-                mem_used_gb = stats.mem_used / 1024 / 1024 / 1024;
-              } else if (stats.memory_used !== undefined) {
-                mem_used_gb = stats.memory_used / 1024 / 1024 / 1024;
-              }
+              if (stats.mem_used_gb !== undefined) mem_used_gb = stats.mem_used_gb;
+              else if (stats.mem_used !== undefined) mem_used_gb = stats.mem_used / 1024 / 1024 / 1024;
 
-              if (stats.mem_total_gb !== undefined) {
-                mem_total_gb = stats.mem_total_gb;
-              } else if (stats.mem_total !== undefined) {
-                mem_total_gb = stats.mem_total / 1024 / 1024 / 1024;
-              } else if (stats.memory_total !== undefined) {
-                mem_total_gb = stats.memory_total / 1024 / 1024 / 1024;
-              }
+              if (stats.mem_total_gb !== undefined) mem_total_gb = stats.mem_total_gb;
+              else if (stats.mem_total !== undefined) mem_total_gb = stats.mem_total / 1024 / 1024 / 1024;
 
-              // Disk - handle various formats
-              if (stats.disk_used_gb !== undefined) {
-                disk_used_gb = stats.disk_used_gb;
-              } else if (stats.disk_used !== undefined) {
-                disk_used_gb = stats.disk_used / 1024 / 1024 / 1024;
-              } else if (
-                stats.disks &&
-                Array.isArray(stats.disks) &&
-                stats.disks.length > 0
-              ) {
-                // Sum all disks
-                disk_used_gb = stats.disks.reduce(
-                  (sum: number, d: any) =>
-                    sum + (d.used_gb || d.used / 1024 / 1024 / 1024 || 0),
-                  0,
-                );
-                disk_total_gb = stats.disks.reduce(
-                  (sum: number, d: any) =>
-                    sum + (d.total_gb || d.total / 1024 / 1024 / 1024 || 0),
-                  0,
-                );
-              }
+              if (stats.disk_used_gb !== undefined) disk_used_gb = stats.disk_used_gb;
+              else if (stats.disks?.[0]) disk_used_gb = stats.disks[0].used_gb || stats.disks[0].used / 1024 / 1024 / 1024;
 
-              if (disk_total_gb === undefined) {
-                if (stats.disk_total_gb !== undefined) {
-                  disk_total_gb = stats.disk_total_gb;
-                } else if (stats.disk_total !== undefined) {
-                  disk_total_gb = stats.disk_total / 1024 / 1024 / 1024;
-                }
-              }
+              if (stats.disk_total_gb !== undefined) disk_total_gb = stats.disk_total_gb;
+              else if (stats.disks?.[0]) disk_total_gb = stats.disks[0].total_gb || stats.disks[0].total / 1024 / 1024 / 1024;
 
-              // Also check for server state in stats
               if (stats.status || stats.state || stats.health) {
-                runtimeState =
-                  stats.health ?? stats.status ?? stats.state ?? runtimeState;
+                runtimeState = stats.health ?? stats.status ?? stats.state ?? runtimeState;
               }
             }
-          } catch {
-            // ignore
-          }
+          } catch { /* ignore */ }
 
           try {
             const listContainersRes = await client.read<any[]>(
               "ListDockerContainers",
-              {
-                server: srv.id,
-              },
+              { server: srv.id },
             );
 
             const containerItems = listContainersRes?.data ?? [];
+            containers = containerItems.map((c: any) => {
+              const id = c?.Id ?? c?.id ?? c?.container_id ?? "";
+              let rawName = (Array.isArray(c?.Names) && c.Names[0]) || c?.Name || c?.name || "";
+              const name = rawName.replace(/^\//, "") || c?.Image?.split(":")[0] || id.slice(0, 12);
+              const state = c?.State ?? c?.Status ?? "unknown";
+              const stats = c?.Status ?? "";
+              const image = c?.Image ?? "";
+              const labels = c?.Labels ?? {};
+              const deploymentId = deploymentMap[name.toLowerCase()];
 
-            // Fetch individual container stats for better accuracy if needed
-            const enhancedContainerPromises = (containerItems || []).map(
-              async (c: any) => {
-                const id = c?.Id ?? c?.id ?? c?.container_id ?? "";
-                let rawName =
-                  (Array.isArray(c?.Names) && c.Names[0]) ||
-                  c?.Name ||
-                  c?.name ||
-                  c?.Names?.[0] ||
-                  "";
-                const name =
-                  rawName.replace(/^\//, "") ||
-                  c?.Image?.split(":")[0] ||
-                  id.slice(0, 12);
-                const state = c?.State ?? c?.Status ?? c?.state ?? "unknown";
-                const stats = c?.Status ?? c?.status ?? "";
-                const image = c?.Image ?? c?.image ?? "";
-                const labels = c?.Labels ?? c?.labels ?? {};
-                const deploymentId = deploymentMap[name.toLowerCase()];
-
-                return {
-                  id,
-                  name,
-                  state,
-                  serverName: srv.name,
-                  serverId: srv.id,
-                  stats,
-                  image,
-                  deploymentId,
-                  labels,
-                };
-              },
-            );
-
-            containers = await Promise.all(enhancedContainerPromises);
+              return {
+                id,
+                name,
+                state,
+                serverName: srv.name,
+                serverId: srv.id,
+                stats,
+                image,
+                deploymentId,
+                labels,
+              };
+            });
 
             containersByServer[srv.id] = containers;
           } catch {
@@ -361,125 +335,64 @@ export default function Dashboard() {
         });
 
         const perServerResults = await Promise.all(perServerPromises);
-
         const updatedServers = perServerResults.map((r) => r.server);
-        const allContainersFlat = perServerResults.flatMap(
-          (r) => r.containers || [],
-        );
+        const allContainersFlat = perServerResults.flatMap((r) => r.containers || []);
 
-        // 4) Enhance stacks with container info using server_id from GetStack
-        const enhancedStacks: ExtendedStackItem[] = stacksWithDetails.map(
-          (stack) => {
-            const stackServerId = stack.server_id;
-            const stackNameLower = stack.name.toLowerCase();
-            const stackNameNormalized = stackNameLower
-              .replace(/-/g, "_")
-              .replace(/_/g, "");
+        // 6) Enhance stacks with container info
+        const enhancedStacks: ExtendedStackItem[] = stacksWithDetails.map((stack) => {
+          const stackServerId = stack.server_id;
+          const stackNameLower = stack.name.toLowerCase();
+          const stackNameNormalized = stackNameLower.replace(/-/g, "_").replace(/_/g, "");
 
-            // Get containers from the stack's server
-            const serverContainers = stackServerId
-              ? containersByServer[stackServerId] || []
-              : allContainersFlat;
+          const serverContainers = stackServerId ? containersByServer[stackServerId] || [] : allContainersFlat;
 
-            // Find containers by Docker labels OR name pattern
-            const stackContainers = serverContainers.filter((c) => {
-              const labels = c.labels || {};
+          const stackContainers = serverContainers.filter((c) => {
+            const labels = c.labels || {};
+            const composeProject = (labels["com.docker.compose.project"] || "").toLowerCase();
+            const stackNameLabel = (labels["com.docker.stack.namespace"] || "").toLowerCase();
+            const komodoStack = (labels["komodo.stack"] || "").toLowerCase();
 
-              // Check Docker Compose / Swarm labels
-              const composeProject = (
-                labels["com.docker.compose.project"] || ""
-              ).toLowerCase();
-              const stackNameLabel = (
-                labels["com.docker.stack.namespace"] || ""
-              ).toLowerCase();
-              const komodoStack = (labels["komodo.stack"] || "").toLowerCase();
+            if (composeProject === stackNameLower || composeProject === stackNameNormalized) return true;
+            if (stackNameLabel === stackNameLower || stackNameLabel === stackNameNormalized) return true;
+            if (komodoStack === stackNameLower || komodoStack === stackNameNormalized) return true;
 
-              // Exact label match
-              if (
-                composeProject === stackNameLower ||
-                composeProject === stackNameNormalized
-              )
-                return true;
-              if (
-                stackNameLabel === stackNameLower ||
-                stackNameLabel === stackNameNormalized
-              )
-                return true;
-              if (
-                komodoStack === stackNameLower ||
-                komodoStack === stackNameNormalized
-              )
-                return true;
+            const containerNameLower = c.name.toLowerCase();
+            if (containerNameLower === stackNameLower || containerNameLower.startsWith(stackNameLower + "_") || containerNameLower.startsWith(stackNameLower + "-")) return true;
+            
+            const parts = containerNameLower.split(/[-_.]/);
+            return parts.some(p => p === stackNameLower || p === stackNameNormalized);
+          });
 
-              // Name pattern matching (for containers without labels)
-              const containerNameLower = c.name.toLowerCase();
-              
-              // Direct name match or starts with stack name followed by separator
-              if (
-                containerNameLower === stackNameLower ||
-                containerNameLower.startsWith(stackNameLower + "_") ||
-                containerNameLower.startsWith(stackNameLower + "-") ||
-                containerNameLower.startsWith(stackNameNormalized + "_") ||
-                containerNameLower.startsWith(stackNameNormalized + "-")
-              ) {
-                return true;
-              }
+          const serverName = stackServerId ? serverNameById[stackServerId] : stackContainers[0]?.serverName;
 
-              // Handle cases where stack name might be a prefix without separator
-              // (e.g. stack "db" and container "db-main" or "db_sql")
-              // But be careful not to match "database" to "db"
-              if (containerNameLower.includes(stackNameLower) || containerNameLower.includes(stackNameNormalized)) {
-                // If the container name contains the stack name as a distinct part
-                const parts = containerNameLower.split(/[-_.]/);
-                return parts.some(p => p === stackNameLower || p === stackNameNormalized);
-              }
+          const runningCount = stackContainers.filter((c) => {
+            const state = c.state?.toLowerCase() || "";
+            return ["running", "up", "healthy"].some((s) => state.includes(s));
+          }).length;
 
-              return false;
-            });
+          let derivedState = "stopped";
+          if (stackContainers.length > 0) {
+            if (runningCount === stackContainers.length) derivedState = "running";
+            else if (runningCount > 0) derivedState = "partial";
+            else derivedState = "stopped";
+          } else if (stack.state && stack.state !== "unknown") {
+            derivedState = stack.state;
+          }
 
-            const serverName = stackServerId
-              ? serverNameById[stackServerId]
-              : stackContainers.length > 0
-                ? stackContainers[0].serverName
-                : undefined;
-
-            // Determine stack state based on containers
-            const runningCount = stackContainers.filter((c) => {
-              const state = c.state?.toLowerCase() || "";
-              return ["running", "up", "healthy"].some((s) =>
-                state.includes(s),
-              );
-            }).length;
-
-            let derivedState = "stopped";
-            if (stackContainers.length > 0) {
-              if (runningCount === stackContainers.length)
-                derivedState = "running";
-              else if (runningCount > 0) derivedState = "partial";
-              else derivedState = "stopped";
-            } else if (stack.state && stack.state !== "unknown") {
-              derivedState = stack.state;
-            }
-
-            return {
-              ...stack,
-              state: derivedState,
-              containers: stackContainers.map((c) => ({
-                id: c.id,
-                name: c.name,
-                state: c.state,
-              })),
-              serverName,
-            };
-          },
-        );
+          return {
+            ...stack,
+            state: derivedState,
+            containers: stackContainers.map((c) => ({ id: c.id, name: c.name, state: c.state })),
+            serverName,
+          };
+        });
 
         // Update state atomically
         setResources({
           stacks: enhancedStacks,
-          deployments: allContainersFlat,
+          deployments: enhancedDeployments.length > 0 ? (enhancedDeployments as ContainerItem[]) : allContainersFlat,
           servers: updatedServers,
-          builds: buildsRes.data || [],
+          builds: buildsWithStats,
           repos: reposRes.data || [],
           containersByServer,
           deploymentMap,
