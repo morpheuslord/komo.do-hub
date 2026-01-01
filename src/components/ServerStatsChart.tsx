@@ -29,7 +29,7 @@ interface ServerStatsChartProps {
   currentMemPercent?: number;
   currentDiskPercent?: number;
   isVisible: boolean;
-
+  statsHistory?: StatsDataPoint[];
 }
 
 const STORAGE_KEY_PREFIX = 'komodo_server_stats_';
@@ -126,7 +126,7 @@ export function ServerStatsChart({
 
   // Calculate stats from history
   const stats = useMemo(() => {
-    const data = statsHistory.length > 0 ? statsHistory : displayData;
+    const data = (statsHistory && statsHistory.length > 0) ? statsHistory : displayData;
     if (data.length === 0) return { avgCpu: 0, avgMem: 0, avgDisk: 0 };
     
     const avgCpu = data.reduce((a, b) => a + b.cpu, 0) / data.length;
@@ -138,7 +138,7 @@ export function ServerStatsChart({
 
   // Time range display
   const timeRange = useMemo(() => {
-    const data = statsHistory.length > 0 ? statsHistory : displayData;
+    const data = (statsHistory && statsHistory.length > 0) ? statsHistory : displayData;
     if (data.length < 2) return 'Collecting...';
     const oldest = new Date(data[0].timestamp);
     const newest = new Date(data[data.length - 1].timestamp);

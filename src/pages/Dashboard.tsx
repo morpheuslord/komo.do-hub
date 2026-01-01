@@ -500,6 +500,48 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [fetchResources, isBypassMode]);
 
+  // Keep track of stats history for each server
+  const [statsHistory, setStatsHistory] = useState<Record<string, any[]>>(() => {
+    const saved = sessionStorage.getItem('komodo_stats_history');
+    return saved ? JSON.parse(saved) : {};
+  });
+
+  useEffect(() => {
+    if (resources.servers.length === 0) return;
+
+    setStatsHistory(prev => {
+      const next = { ...prev };
+      let changed = false;
+      const now = Date.now();
+      const timeStr = new Date(now).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const cutoff = now - 24 * 60 * 60 * 1000;
+
+      resources.servers.forEach(srv => {
+        const history = next[srv.id] || [];
+        const cpu = srv.cpu_perc ?? 0;
+        const mem = srv.mem_total_gb ? (srv.mem_used_gb! / srv.mem_total_gb) * 100 : 0;
+        const disk = srv.disk_total_gb ? (srv.disk_used_gb! / srv.disk_total_gb) * 100 : 0;
+
+        const newPoint = {
+          time: timeStr,
+          timestamp: now,
+          cpu,
+          memory: mem,
+          disk
+        };
+
+        const updatedHistory = [...history.filter(p => p.timestamp > cutoff), newPoint].slice(-28800);
+        next[srv.id] = updatedHistory;
+        changed = true;
+      });
+
+      if (changed) {
+        sessionStorage.setItem('komodo_stats_history', JSON.stringify(next));
+      }
+      return next;
+    });
+  }, [resources.servers]);
+
   const handleAction = async (
     action: string,
     resourceType: string,
