@@ -55,11 +55,12 @@ function getStorageKey(serverId: string) {
 }
 
 function loadHistory(serverId: string): StatsDataPoint[] {
+  // Use session storage or internal state instead of localStorage to avoid stale data between sessions
+  // but keep it for the current session to show the 24h view accurately
   try {
-    const stored = localStorage.getItem(getStorageKey(serverId));
+    const stored = sessionStorage.getItem(getStorageKey(serverId));
     if (stored) {
       const data = JSON.parse(stored) as StatsDataPoint[];
-      // Filter to last 24 hours
       const cutoff = Date.now() - 24 * 60 * 60 * 1000;
       return data.filter((d) => d.timestamp > cutoff);
     }
@@ -71,10 +72,9 @@ function loadHistory(serverId: string): StatsDataPoint[] {
 
 function saveHistory(serverId: string, data: StatsDataPoint[]) {
   try {
-    // Keep only last 24 hours
     const cutoff = Date.now() - 24 * 60 * 60 * 1000;
     const filtered = data.filter((d) => d.timestamp > cutoff).slice(-MAX_DATA_POINTS);
-    localStorage.setItem(getStorageKey(serverId), JSON.stringify(filtered));
+    sessionStorage.setItem(getStorageKey(serverId), JSON.stringify(filtered));
   } catch {
     // ignore storage errors
   }

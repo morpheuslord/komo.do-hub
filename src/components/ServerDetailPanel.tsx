@@ -138,7 +138,7 @@ export function ServerDetailPanel({ server, containers, onAction, actionLoading,
           </CardContent>
         </CollapsibleTrigger>
 
-        <CollapsibleContent>
+        <CollapsibleContent className="transition-all duration-300 ease-in-out">
           <div className="border-t-2 border-foreground p-4 bg-secondary/50">
             {/* Last Update Indicator */}
             <div className="flex items-center justify-between mb-4">
@@ -166,7 +166,26 @@ export function ServerDetailPanel({ server, containers, onAction, actionLoading,
               </div>
             </div>
 
-            {/* Detailed Stats */}
+            {/* Disk & Network Stats */}
+            <div className="grid grid-cols-2 gap-2">
+              <div className="flex items-center justify-between p-2 border border-foreground bg-background">
+                <div className="flex items-center gap-2">
+                  <HardDrive className="w-4 h-4 text-chart-4" />
+                  <span className="font-mono text-sm">Disk Usage</span>
+                </div>
+                <span className="font-mono text-sm font-bold">{diskPercent.toFixed(1)}%</span>
+              </div>
+              <div className="flex items-center justify-between p-2 border border-foreground bg-background">
+                <div className="flex items-center gap-2">
+                  <Wifi className="w-4 h-4 text-chart-3" />
+                  <span className="font-mono text-sm">Network</span>
+                </div>
+                <span className="font-mono text-sm text-muted-foreground truncate max-w-[80px]">
+                  {server.address || 'N/A'}
+                </span>
+              </div>
+            </div>
+
             <div className="space-y-4">
               {/* CPU */}
               <div className="space-y-1">
@@ -192,29 +211,6 @@ export function ServerDetailPanel({ server, containers, onAction, actionLoading,
                   </span>
                 </div>
                 <Progress value={memPercent} className="h-3" />
-              </div>
-
-              {/* Disk */}
-              <div className="space-y-1">
-                <div className="flex justify-between items-center">
-                  <div className="flex items-center gap-2">
-                    <HardDrive className="w-4 h-4 text-chart-4" />
-                    <span className="font-mono text-sm font-medium">Disk</span>
-                  </div>
-                  <span className="font-mono text-sm font-bold">
-                    {diskUsed.toFixed(1)} / {diskTotal.toFixed(1)} GB
-                  </span>
-                </div>
-                <Progress value={diskPercent} className="h-3" />
-              </div>
-
-              {/* Network */}
-              <div className="flex items-center justify-between p-2 border border-foreground bg-background">
-                <div className="flex items-center gap-2">
-                  <Wifi className="w-4 h-4 text-chart-3" />
-                  <span className="font-mono text-sm">Network</span>
-                </div>
-                <span className="font-mono text-sm text-muted-foreground">{server.address || 'N/A'}</span>
               </div>
             </div>
 

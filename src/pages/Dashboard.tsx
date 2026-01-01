@@ -251,8 +251,8 @@ export default function Dashboard() {
 
           const containerItems = ('data' in listContainersRes && listContainersRes.data) ? listContainersRes.data : [];
 
-          containers = (containerItems || []).map((c: any) => {
-            // Use full container ID for API calls
+          // Fetch individual container stats for better accuracy if needed
+          const enhancedContainerPromises = (containerItems || []).map(async (c: any) => {
             const id = c?.Id ?? c?.id ?? c?.container_id ?? '';
             let rawName =
               (Array.isArray(c?.Names) && c.Names[0]) ||
@@ -264,13 +264,9 @@ export default function Dashboard() {
             const state = c?.State ?? c?.Status ?? c?.state ?? 'unknown';
             const stats = c?.Status ?? c?.status ?? '';
             const image = c?.Image ?? c?.image ?? '';
-            
-            // Capture Docker labels for stack association
             const labels = c?.Labels ?? c?.labels ?? {};
-            
-            // Find matching deployment ID by name
             const deploymentId = deploymentMap[name.toLowerCase()];
-            
+
             return { 
               id, 
               name, 
@@ -283,6 +279,8 @@ export default function Dashboard() {
               labels
             };
           });
+
+          containers = await Promise.all(enhancedContainerPromises);
           
           containersByServer[srv.id] = containers;
         } catch {
@@ -341,7 +339,8 @@ export default function Dashboard() {
           
           // Fallback: name-based matching for non-labeled containers
           const containerNameLower = c.name.toLowerCase();
-          return containerNameLower.startsWith(stackNameLower + '_') || 
+          return containerNameLower === stackNameLower ||
+                 containerNameLower.startsWith(stackNameLower + '_') || 
                  containerNameLower.startsWith(stackNameLower + '-') ||
                  containerNameLower.startsWith(stackNameNormalized + '_') ||
                  containerNameLower.startsWith(stackNameNormalized + '-');
@@ -350,8 +349,24 @@ export default function Dashboard() {
         const serverName = stack.server_id ? serverNameById[stack.server_id] : 
           (stackContainers.length > 0 ? stackContainers[0].serverName : undefined);
         
+        // Determine stack state based on containers
+        const runningCount = stackContainers.filter(c => {
+          const state = c.state?.toLowerCase() || '';
+          return ['running', 'up', 'healthy'].some(s => state.includes(s));
+        }).length;
+        
+        let derivedState = 'stopped';
+        if (stackContainers.length > 0) {
+          if (runningCount === stackContainers.length) derivedState = 'running';
+          else if (runningCount > 0) derivedState = 'partial';
+          else derivedState = 'stopped';
+        } else if (stack.state && stack.state !== 'unknown') {
+          derivedState = stack.state;
+        }
+        
         return {
           ...stack,
+          state: derivedState,
           containers: stackContainers.map((c) => ({ id: c.id, name: c.name, state: c.state })),
           serverName,
         };

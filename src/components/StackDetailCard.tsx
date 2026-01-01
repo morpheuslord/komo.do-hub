@@ -159,7 +159,7 @@ export function StackDetailCard({ stack, serverName, containers, onAction, actio
           </CardContent>
         </CollapsibleTrigger>
 
-        <CollapsibleContent>
+        <CollapsibleContent className="transition-all duration-300 ease-in-out">
           <div className="border-t-2 border-foreground p-4 bg-secondary/50">
             {/* Stack Info */}
             <div className="space-y-3">
