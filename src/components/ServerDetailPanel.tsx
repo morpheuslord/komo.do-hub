@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -24,6 +24,14 @@ import {
 } from 'lucide-react';
 import type { ServerListItem } from '@/lib/komodo-api';
 import { ServerStatsChart } from './ServerStatsChart';
+
+interface StatsDataPoint {
+  time: string;
+  timestamp: number;
+  cpu: number;
+  memory: number;
+  disk: number;
+}
 
 interface ServerDetailPanelProps {
   server: ServerListItem;
@@ -54,19 +62,16 @@ function getStatusVariant(state?: string): "default" | "secondary" | "destructiv
   return 'secondary';
 }
 
+function formatTimeShort(timestamp: number): string {
+  const date = new Date(timestamp);
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
 export function ServerDetailPanel({ server, containers, onAction, actionLoading, onRefreshServer }: ServerDetailPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(new Date());
-
-  // Auto-refresh when panel is open - every 3 seconds for charts
-  useEffect(() => {
-    if (!isOpen) return;
-    const interval = setInterval(() => {
-      setLastUpdate(new Date());
-      onRefreshServer?.(server.id);
-    }, 3000); // Update every 3 seconds
-    return () => clearInterval(interval);
-  }, [isOpen, server.id, onRefreshServer]);
+  const [statsHistory, setStatsHistory] = useState<StatsDataPoint[]>([]);
+  const lastStatsRef = useRef({ cpu: 0, mem: 0, disk: 0 });
 
   const cpuPercent = server.cpu_perc ?? 0;
   const memUsed = server.mem_used_gb ?? 0;
@@ -75,6 +80,38 @@ export function ServerDetailPanel({ server, containers, onAction, actionLoading,
   const diskTotal = server.disk_total_gb ?? 1;
   const memPercent = memTotal > 0 ? (memUsed / memTotal) * 100 : 0;
   const diskPercent = diskTotal > 0 ? (diskUsed / diskTotal) * 100 : 0;
+
+  // Collect stats when panel is open and values change
+  useEffect(() => {
+    if (!isOpen) return;
+
+    // Only add point if values have changed
+    const hasChanged = 
+      Math.abs(lastStatsRef.current.cpu - cpuPercent) > 0.1 ||
+      Math.abs(lastStatsRef.current.mem - memPercent) > 0.1 ||
+      Math.abs(lastStatsRef.current.disk - diskPercent) > 0.1;
+
+    if (hasChanged) {
+      const now = Date.now();
+      const newPoint: StatsDataPoint = {
+        time: formatTimeShort(now),
+        timestamp: now,
+        cpu: Number(cpuPercent.toFixed(1)),
+        memory: Number(memPercent.toFixed(1)),
+        disk: Number(diskPercent.toFixed(1)),
+      };
+
+      lastStatsRef.current = { cpu: cpuPercent, mem: memPercent, disk: diskPercent };
+      setLastUpdate(new Date());
+
+      setStatsHistory(prev => {
+        // Keep last 24h of data (at 3s intervals, that's ~28800 points max)
+        const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+        const filtered = prev.filter(p => p.timestamp > cutoff);
+        return [...filtered, newPoint].slice(-28800);
+      });
+    }
+  }, [isOpen, cpuPercent, memPercent, diskPercent]);
 
   const serverContainers = containers.filter(c => c.id);
   const runningContainers = serverContainers.filter(c => 
@@ -100,9 +137,6 @@ export function ServerDetailPanel({ server, containers, onAction, actionLoading,
                 </div>
                 <div className="min-w-0 flex-1">
                   <h3 className="font-mono font-bold text-sm truncate">{server.name}</h3>
-                  {server.address && (
-                    <p className="font-mono text-xs text-muted-foreground truncate">{server.address}</p>
-                  )}
                   <div className="flex items-center gap-2 mt-1 flex-wrap">
                     {getStatusIcon(server.state)}
                     <Badge variant={getStatusVariant(server.state)} className="font-mono text-xs uppercase">
@@ -252,6 +286,7 @@ export function ServerDetailPanel({ server, containers, onAction, actionLoading,
               currentMemPercent={memPercent}
               currentDiskPercent={diskPercent}
               isVisible={isOpen}
+              statsHistory={statsHistory}
             />
 
             {/* Action Buttons */}
