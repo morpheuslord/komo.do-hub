@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -88,6 +88,11 @@ function computeStackState(stackState: string | undefined, containers: StackCont
 export function StackDetailCard({ stack, serverName, containers, onAction, actionLoading }: StackDetailCardProps) {
   const [isOpen, setIsOpen] = useState(false);
   
+  // Prevent rapid toggling
+  const handleOpenChange = useCallback((open: boolean) => {
+    setIsOpen(open);
+  }, []);
+  
   const derivedState = computeStackState(stack.state || stack.status, containers);
   const runningContainers = containers.filter(c => {
     const state = c.state?.toLowerCase() || '';
@@ -95,7 +100,7 @@ export function StackDetailCard({ stack, serverName, containers, onAction, actio
   });
 
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+    <Collapsible open={isOpen} onOpenChange={handleOpenChange}>
       <Card className="border-2 border-foreground shadow-xs hover:shadow-sm transition-shadow">
         <CollapsibleTrigger asChild>
           <CardContent className="p-4 cursor-pointer">
@@ -159,8 +164,8 @@ export function StackDetailCard({ stack, serverName, containers, onAction, actio
           </CardContent>
         </CollapsibleTrigger>
 
-        <CollapsibleContent className="transition-all duration-300 ease-in-out">
-          <div className="border-t-2 border-foreground p-4 bg-secondary/50">
+        <CollapsibleContent className="transition-all duration-300 ease-in-out overflow-hidden">
+          <div className="border-t-2 border-foreground p-4 bg-secondary/50 max-h-[80vh] overflow-y-auto">
             {/* Stack Info */}
             <div className="space-y-3">
               {/* Server */}

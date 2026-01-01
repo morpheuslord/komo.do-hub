@@ -51,6 +51,8 @@ export interface ServerListItem {
   mem_total_gb?: number;
   disk_used_gb?: number;
   disk_total_gb?: number;
+  network_ingress_bytes?: number;
+  network_egress_bytes?: number;
 }
 
 export interface BuildListItem {

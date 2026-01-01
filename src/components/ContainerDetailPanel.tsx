@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -55,9 +55,22 @@ function getStatusVariant(state?: string): "default" | "secondary" | "destructiv
   return 'secondary';
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
+}
+
 export function ContainerDetailPanel({ container, onAction, actionLoading }: ContainerDetailPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [uptime, setUptime] = useState(container.stats || '');
+  
+  // Prevent rapid toggling
+  const handleOpenChange = useCallback((open: boolean) => {
+    setIsOpen(open);
+  }, []);
 
   useEffect(() => {
     if (container.stats) setUptime(container.stats);
@@ -75,7 +88,7 @@ export function ContainerDetailPanel({ container, onAction, actionLoading }: Con
   const imageTag = container.image?.split(':')[1] || 'latest';
 
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+    <Collapsible open={isOpen} onOpenChange={handleOpenChange}>
       <Card className="border-2 border-foreground shadow-xs hover:shadow-sm transition-shadow">
         <CollapsibleTrigger asChild>
           <CardContent className="p-4 cursor-pointer">
@@ -110,8 +123,8 @@ export function ContainerDetailPanel({ container, onAction, actionLoading }: Con
           </CardContent>
         </CollapsibleTrigger>
 
-        <CollapsibleContent className="transition-all duration-300 ease-in-out">
-          <div className="border-t-2 border-foreground p-4 bg-secondary/50">
+        <CollapsibleContent className="transition-all duration-300 ease-in-out overflow-hidden">
+          <div className="border-t-2 border-foreground p-4 bg-secondary/50 max-h-[80vh] overflow-y-auto">
             {/* Container Details */}
             <div className="space-y-3">
               {/* Status */}
@@ -146,6 +159,21 @@ export function ContainerDetailPanel({ container, onAction, actionLoading }: Con
                   {uptime || 'N/A'}
                 </span>
               </div>
+
+              {/* Network Stats (if available) */}
+              {(container as any).networkIngress !== undefined || (container as any).networkEgress !== undefined ? (
+                <div className="flex items-center justify-between p-2 border border-foreground bg-background">
+                  <div className="flex items-center gap-2">
+                    <Activity className="w-4 h-4 text-chart-3" />
+                    <span className="font-mono text-sm">Network</span>
+                  </div>
+                  <div className="flex flex-col items-end">
+                    <span className="font-mono text-xs text-muted-foreground">
+                      ↓ {formatBytes((container as any).networkIngress || 0)} / ↑ {formatBytes((container as any).networkEgress || 0)}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
 
               {/* Image */}
               {container.image && (

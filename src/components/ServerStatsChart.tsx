@@ -41,32 +41,7 @@ function getStorageKey(serverId: string) {
   return `${STORAGE_KEY_PREFIX}${serverId}`;
 }
 
-function loadHistory(serverId: string): StatsDataPoint[] {
-  // Use session storage or internal state instead of localStorage to avoid stale data between sessions
-  // but keep it for the current session to show the 24h view accurately
-  try {
-    const stored = sessionStorage.getItem(getStorageKey(serverId));
-    if (stored) {
-      const data = JSON.parse(stored) as StatsDataPoint[];
-      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-      return data.filter((d) => d.timestamp > cutoff);
-    }
-  } catch {
-    // ignore
-  }
-  return [];
-}
-
-function saveHistory(serverId: string, data: StatsDataPoint[]) {
-  try {
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    const filtered = data.filter((d) => d.timestamp > cutoff).slice(-MAX_DATA_POINTS);
-    sessionStorage.setItem(getStorageKey(serverId), JSON.stringify(filtered));
-  } catch {
-    // ignore storage errors
-  }
-
-}
+// Removed sessionStorage - all data is now in-memory only via props
 
 function formatTimeShort(timestamp: number): string {
   const date = new Date(timestamp);

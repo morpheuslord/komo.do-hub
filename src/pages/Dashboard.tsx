@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/components/ThemeProvider";
 import { Button } from "@/components/ui/button";
@@ -53,6 +53,11 @@ interface ContainerItem {
   image?: string;
   deploymentId?: string;
   labels?: Record<string, string>;
+  networkIngress?: number;
+  networkEgress?: number;
+  cpu_perc?: number;
+  mem_used_gb?: number;
+  mem_total_gb?: number;
 }
 
 interface ResourceState {
@@ -104,6 +109,23 @@ function getStatusVariant(
   }
 }
 
+// Helper function to parse byte strings like "8.92MB" to bytes
+function parseBytes(value: string, unit: string): number {
+  const num = parseFloat(value);
+  if (isNaN(num)) return 0;
+  
+  const unitUpper = unit.toUpperCase();
+  const multipliers: Record<string, number> = {
+    'B': 1,
+    'KB': 1024,
+    'MB': 1024 * 1024,
+    'GB': 1024 * 1024 * 1024,
+    'TB': 1024 * 1024 * 1024 * 1024,
+  };
+  
+  return num * (multipliers[unitUpper] || 1);
+}
+
 export default function Dashboard() {
   const { client, credentials, logout } = useAuth();
   const { isDark, setTheme } = useTheme();
@@ -128,7 +150,13 @@ export default function Dashboard() {
   const fetchResources = useCallback(
     async (showRefresh = false) => {
       // Prevent concurrent fetches
-      if (fetchingRef.current) return;
+      if (fetchingRef.current) {
+        if (showRefresh) {
+          // If already fetching, just return - don't show refresh spinner
+          return;
+        }
+        return;
+      }
       fetchingRef.current = true;
 
       if (isBypassMode) {
@@ -207,19 +235,43 @@ export default function Dashboard() {
             const containerRes = await client.read<any>("GetDeploymentContainer", { deployment: dep.id });
             let containerInfo = containerRes?.data || {};
             
-            // Get deployment stats
+            // Get deployment stats (includes network stats)
             const statsRes = await client.read<any>("GetDeploymentStats", { deployment: dep.id });
             const stats = statsRes?.data || {};
 
+            // Extract state - use container state if available, otherwise deployment state
+            let containerState = containerInfo.state ?? containerInfo.State ?? dep.state ?? "unknown";
+            
+            // Extract network stats from deployment stats
+            let networkIngress = stats.network_ingress_bytes ?? stats.network_rx_bytes ?? stats.rx_bytes ?? 0;
+            let networkEgress = stats.network_egress_bytes ?? stats.network_tx_bytes ?? stats.tx_bytes ?? 0;
+            
+            // If network stats are in net_io format, parse them
+            if (stats.net_io && networkIngress === 0 && networkEgress === 0) {
+              const netIoMatch = stats.net_io.match(/([\d.]+)\s*([KMGT]?B)\s*\/\s*([\d.]+)\s*([KMGT]?B)/i);
+              if (netIoMatch) {
+                const [, rxVal, rxUnit, txVal, txUnit] = netIoMatch;
+                networkIngress = parseBytes(rxVal, rxUnit);
+                networkEgress = parseBytes(txVal, txUnit);
+              }
+            }
+
             return {
               ...dep,
-              containerId: containerInfo.id,
-              state: containerInfo.state || dep.state,
-              stats: stats.status || dep.status,
-              image: containerInfo.image || dep.image,
-              labels: containerInfo.labels || {}
+              containerId: containerInfo.id ?? containerInfo.Id,
+              state: containerState,
+              stats: stats.status ?? containerInfo.status ?? containerInfo.Status ?? dep.status ?? "",
+              image: containerInfo.image ?? containerInfo.Image ?? dep.image,
+              labels: containerInfo.labels ?? containerInfo.Labels ?? {},
+              networkIngress,
+              networkEgress,
+              // Include other stats if available
+              cpu_perc: stats.cpu_perc ?? stats.cpu ?? 0,
+              mem_used_gb: stats.mem_used_gb ?? stats.memory_usage_gb ?? 0,
+              mem_total_gb: stats.mem_total_gb ?? stats.memory_limit_gb ?? 1,
             };
-          } catch {
+          } catch (error) {
+            console.warn(`[Dashboard] Failed to fetch stats for deployment ${dep.id}:`, error);
             return dep;
           }
         }));
@@ -258,6 +310,21 @@ export default function Dashboard() {
           let mem_total_gb: number | undefined;
           let disk_used_gb: number | undefined;
           let disk_total_gb: number | undefined;
+          let network_ingress_bytes: number | undefined;
+          let network_egress_bytes: number | undefined;
+
+          // Get server state first
+          try {
+            const serverStateRes = await client.read<any>("GetServerState", {
+              server: srv.id,
+            });
+            if (serverStateRes?.success && serverStateRes.data) {
+              const serverState = serverStateRes.data;
+              runtimeState = serverState.state ?? serverState.status ?? serverState.health ?? runtimeState;
+            }
+          } catch (error) {
+            console.warn(`[Dashboard] Failed to fetch server state for ${srv.id}:`, error);
+          }
 
           try {
             const statsRes = await client.read<any>("GetSystemStats", {
@@ -265,25 +332,41 @@ export default function Dashboard() {
             });
             if (statsRes?.success && statsRes.data) {
               const stats = statsRes.data;
-              cpu_perc = stats.cpu_perc ?? stats.cpu ?? stats.cpu_percent ?? stats.cpu_usage;
+              cpu_perc = stats.cpu_perc ?? stats.cpu ?? stats.cpu_percent ?? stats.cpu_usage ?? 0;
 
+              // Memory stats
               if (stats.mem_used_gb !== undefined) mem_used_gb = stats.mem_used_gb;
               else if (stats.mem_used !== undefined) mem_used_gb = stats.mem_used / 1024 / 1024 / 1024;
+              else mem_used_gb = 0;
 
               if (stats.mem_total_gb !== undefined) mem_total_gb = stats.mem_total_gb;
               else if (stats.mem_total !== undefined) mem_total_gb = stats.mem_total / 1024 / 1024 / 1024;
+              else mem_total_gb = 1;
 
-              if (stats.disk_used_gb !== undefined) disk_used_gb = stats.disk_used_gb;
-              else if (stats.disks?.[0]) disk_used_gb = stats.disks[0].used_gb || stats.disks[0].used / 1024 / 1024 / 1024;
+              // Disk stats - use the first disk or aggregate if multiple
+              if (stats.disks && Array.isArray(stats.disks) && stats.disks.length > 0) {
+                // Use the root disk (usually the first one or the one with mount "/")
+                const rootDisk = stats.disks.find((d: any) => d.mount === "/" || d.mount === "/sbin/docker-init") || stats.disks[0];
+                if (rootDisk) {
+                  disk_used_gb = rootDisk.used_gb ?? (rootDisk.used ? rootDisk.used / 1024 / 1024 / 1024 : 0);
+                  disk_total_gb = rootDisk.total_gb ?? (rootDisk.total ? rootDisk.total / 1024 / 1024 / 1024 : 1);
+                }
+              } else if (stats.disk_used_gb !== undefined) {
+                disk_used_gb = stats.disk_used_gb;
+                disk_total_gb = stats.disk_total_gb ?? 1;
+              }
 
-              if (stats.disk_total_gb !== undefined) disk_total_gb = stats.disk_total_gb;
-              else if (stats.disks?.[0]) disk_total_gb = stats.disks[0].total_gb || stats.disks[0].total / 1024 / 1024 / 1024;
+              // Network stats
+              network_ingress_bytes = stats.network_ingress_bytes ?? stats.network_rx_bytes ?? stats.rx_bytes ?? 0;
+              network_egress_bytes = stats.network_egress_bytes ?? stats.network_tx_bytes ?? stats.tx_bytes ?? 0;
 
               if (stats.status || stats.state || stats.health) {
                 runtimeState = stats.health ?? stats.status ?? stats.state ?? runtimeState;
               }
             }
-          } catch { /* ignore */ }
+          } catch (error) {
+            console.warn(`[Dashboard] Failed to fetch stats for server ${srv.id}:`, error);
+          }
 
           try {
             const listContainersRes = await client.read<any[]>(
@@ -293,14 +376,30 @@ export default function Dashboard() {
 
             const containerItems = listContainersRes?.data ?? [];
             containers = containerItems.map((c: any) => {
-              const id = c?.Id ?? c?.id ?? c?.container_id ?? "";
-              let rawName = (Array.isArray(c?.Names) && c.Names[0]) || c?.Name || c?.name || "";
-              const name = rawName.replace(/^\//, "") || c?.Image?.split(":")[0] || id.slice(0, 12);
-              const state = c?.State ?? c?.Status ?? "unknown";
-              const stats = c?.Status ?? "";
-              const image = c?.Image ?? "";
-              const labels = c?.Labels ?? {};
+              const id = c?.id ?? c?.Id ?? c?.container_id ?? "";
+              let rawName = c?.name ?? ((Array.isArray(c?.Names) && c.Names[0]) || c?.Name || "");
+              const name = rawName.replace(/^\//, "") || c?.image?.split(":")[0] || c?.Image?.split(":")[0] || id.slice(0, 12);
+              // Use 'state' field directly (e.g., "running", "stopped", "exited")
+              // Status is human-readable (e.g., "Up 22 hours"), so don't use it for state
+              const state = c?.state ?? c?.State ?? "unknown";
+              // Status is the human-readable uptime string
+              const status = c?.status ?? c?.Status ?? "";
+              const image = c?.image ?? c?.Image ?? "";
+              const labels = c?.labels ?? c?.Labels ?? {};
               const deploymentId = deploymentMap[name.toLowerCase()];
+              
+              // Extract network stats from stats.net_io if available
+              let networkIngress = 0;
+              let networkEgress = 0;
+              if (c?.stats?.net_io) {
+                // Parse "8.92MB / 58.9MB" format
+                const netIoMatch = c.stats.net_io.match(/([\d.]+)\s*([KMGT]?B)\s*\/\s*([\d.]+)\s*([KMGT]?B)/i);
+                if (netIoMatch) {
+                  const [, rxVal, rxUnit, txVal, txUnit] = netIoMatch;
+                  networkIngress = parseBytes(rxVal, rxUnit);
+                  networkEgress = parseBytes(txVal, txUnit);
+                }
+              }
 
               return {
                 id,
@@ -308,10 +407,12 @@ export default function Dashboard() {
                 state,
                 serverName: srv.name,
                 serverId: srv.id,
-                stats,
+                stats: status, // Use status as the uptime string
                 image,
                 deploymentId,
                 labels,
+                networkIngress,
+                networkEgress,
               };
             });
 
@@ -329,6 +430,8 @@ export default function Dashboard() {
               mem_total_gb,
               disk_used_gb,
               disk_total_gb,
+              network_ingress_bytes,
+              network_egress_bytes,
             },
             containers,
           };
@@ -338,32 +441,49 @@ export default function Dashboard() {
         const updatedServers = perServerResults.map((r) => r.server);
         const allContainersFlat = perServerResults.flatMap((r) => r.containers || []);
 
-        // 6) Enhance stacks with container info
-        const enhancedStacks: ExtendedStackItem[] = stacksWithDetails.map((stack) => {
+        // 6) Enhance stacks with container info using ListStackServices API
+        const enhancedStacks: ExtendedStackItem[] = await Promise.all(stacksWithDetails.map(async (stack) => {
           const stackServerId = stack.server_id;
-          const stackNameLower = stack.name.toLowerCase();
-          const stackNameNormalized = stackNameLower.replace(/-/g, "_").replace(/_/g, "");
+          let stackContainers: Array<{ id: string; name: string; state?: string }> = [];
+          let serverName = stackServerId ? serverNameById[stackServerId] : undefined;
 
-          const serverContainers = stackServerId ? containersByServer[stackServerId] || [] : allContainersFlat;
+          // Use ListStackServices API to get stack containers
+          try {
+            const stackServicesRes = await client.read<any>("ListStackServices", {
+              stack: stack.id,
+            });
+            if (stackServicesRes?.success && stackServicesRes.data) {
+              const services = Array.isArray(stackServicesRes.data) ? stackServicesRes.data : [];
+              stackContainers = services.map((service: any) => {
+                const container = service.container || service;
+                return {
+                  id: container.id || container.Id || container.container_id || "",
+                  name: container.name || container.Name || service.name || "",
+                  state: container.state || container.State || container.status || service.state || "unknown",
+                };
+              });
+            }
+          } catch (error) {
+            console.warn(`[Dashboard] Failed to fetch services for stack ${stack.id}:`, error);
+            // Fallback to label-based matching if API fails
+            const serverContainers = stackServerId ? containersByServer[stackServerId] || [] : allContainersFlat;
+            const stackNameLower = stack.name.toLowerCase();
+            stackContainers = serverContainers.filter((c) => {
+              const labels = c.labels || {};
+              const composeProject = (labels["com.docker.compose.project"] || "").toLowerCase();
+              const stackNameLabel = (labels["com.docker.stack.namespace"] || "").toLowerCase();
+              const komodoStack = (labels["komodo.stack"] || "").toLowerCase();
 
-          const stackContainers = serverContainers.filter((c) => {
-            const labels = c.labels || {};
-            const composeProject = (labels["com.docker.compose.project"] || "").toLowerCase();
-            const stackNameLabel = (labels["com.docker.stack.namespace"] || "").toLowerCase();
-            const komodoStack = (labels["komodo.stack"] || "").toLowerCase();
+              if (composeProject === stackNameLower) return true;
+              if (stackNameLabel === stackNameLower) return true;
+              if (komodoStack === stackNameLower) return true;
 
-            if (composeProject === stackNameLower || composeProject === stackNameNormalized) return true;
-            if (stackNameLabel === stackNameLower || stackNameLabel === stackNameNormalized) return true;
-            if (komodoStack === stackNameLower || komodoStack === stackNameNormalized) return true;
-
-            const containerNameLower = c.name.toLowerCase();
-            if (containerNameLower === stackNameLower || containerNameLower.startsWith(stackNameLower + "_") || containerNameLower.startsWith(stackNameLower + "-")) return true;
-            
-            const parts = containerNameLower.split(/[-_.]/);
-            return parts.some(p => p === stackNameLower || p === stackNameNormalized);
-          });
-
-          const serverName = stackServerId ? serverNameById[stackServerId] : stackContainers[0]?.serverName;
+              const containerNameLower = c.name.toLowerCase();
+              if (containerNameLower === stackNameLower || containerNameLower.startsWith(stackNameLower + "_") || containerNameLower.startsWith(stackNameLower + "-")) return true;
+              
+              return false;
+            }).map((c) => ({ id: c.id, name: c.name, state: c.state }));
+          }
 
           const runningCount = stackContainers.filter((c) => {
             const state = c.state?.toLowerCase() || "";
@@ -382,10 +502,10 @@ export default function Dashboard() {
           return {
             ...stack,
             state: derivedState,
-            containers: stackContainers.map((c) => ({ id: c.id, name: c.name, state: c.state })),
+            containers: stackContainers,
             serverName,
           };
-        });
+        }));
 
         // Update state atomically
         setResources({
@@ -417,22 +537,21 @@ export default function Dashboard() {
     fetchResources();
   }, [fetchResources]);
 
-  // Auto-refresh every 3 seconds
+  // Auto-refresh every 3 seconds (only if not already fetching)
   useEffect(() => {
     if (isBypassMode) return;
 
     const interval = setInterval(() => {
-      fetchResources(true);
+      if (!fetchingRef.current) {
+        fetchResources(true);
+      }
     }, 3000);
 
     return () => clearInterval(interval);
   }, [fetchResources, isBypassMode]);
 
-  // Keep track of stats history for each server
-  const [statsHistory, setStatsHistory] = useState<Record<string, any[]>>(() => {
-    const saved = sessionStorage.getItem('komodo_stats_history');
-    return saved ? JSON.parse(saved) : {};
-  });
+  // Keep track of stats history for each server (in-memory only, no localStorage)
+  const [statsHistory, setStatsHistory] = useState<Record<string, any[]>>({});
 
   useEffect(() => {
     if (resources.servers.length === 0) return;
@@ -459,14 +578,14 @@ export default function Dashboard() {
         };
 
         const updatedHistory = [...history.filter(p => p.timestamp > cutoff), newPoint].slice(-28800);
-        next[srv.id] = updatedHistory;
-        changed = true;
+        if (updatedHistory.length !== history.length || updatedHistory.length === 0 || 
+            updatedHistory[updatedHistory.length - 1].timestamp !== history[history.length - 1]?.timestamp) {
+          next[srv.id] = updatedHistory;
+          changed = true;
+        }
       });
 
-      if (changed) {
-        sessionStorage.setItem('komodo_stats_history', JSON.stringify(next));
-      }
-      return next;
+      return changed ? next : prev;
     });
   }, [resources.servers]);
 
@@ -845,7 +964,7 @@ export default function Dashboard() {
             value="stacks"
             className="mt-4 flex-1 min-h-0 overflow-hidden"
           >
-            <ScrollArea className="h-full">
+            <ScrollArea className="h-full" onWheel={(e) => e.stopPropagation()}>
               <div className="space-y-3 pr-2 pb-4">
                 {resources.stacks.length === 0 ? (
                   <Card className="border-2 border-dashed border-muted-foreground">
@@ -881,7 +1000,7 @@ export default function Dashboard() {
             value="deployments"
             className="mt-4 flex-1 min-h-0 overflow-hidden"
           >
-            <ScrollArea className="h-full">
+            <ScrollArea className="h-full" onWheel={(e) => e.stopPropagation()}>
               <div className="space-y-3 pr-2 pb-4">
                 {resources.deployments.length === 0 ? (
                   <Card className="border-2 border-dashed border-muted-foreground">
@@ -913,7 +1032,7 @@ export default function Dashboard() {
             value="servers"
             className="mt-4 flex-1 min-h-0 overflow-hidden"
           >
-            <ScrollArea className="h-full">
+            <ScrollArea className="h-full" onWheel={(e) => e.stopPropagation()}>
               <div className="space-y-3 pr-2 pb-4">
                 {resources.servers.length === 0 ? (
                   <Card className="border-2 border-dashed border-muted-foreground">
@@ -950,7 +1069,7 @@ export default function Dashboard() {
             value="builds"
             className="mt-4 flex-1 min-h-0 overflow-hidden"
           >
-            <ScrollArea className="h-full">
+            <ScrollArea className="h-full" onWheel={(e) => e.stopPropagation()}>
               <div className="space-y-3 pr-2 pb-4">
                 {resources.builds.length === 0 ? (
                   <Card className="border-2 border-dashed border-muted-foreground">
@@ -982,7 +1101,7 @@ export default function Dashboard() {
             value="repos"
             className="mt-4 flex-1 min-h-0 overflow-hidden"
           >
-            <ScrollArea className="h-full">
+            <ScrollArea className="h-full" onWheel={(e) => e.stopPropagation()}>
               <div className="space-y-3 pr-2 pb-4">
                 {resources.repos.length === 0 ? (
                   <Card className="border-2 border-dashed border-muted-foreground">

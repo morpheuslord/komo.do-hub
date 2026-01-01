@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -68,11 +68,27 @@ function formatTimeShort(timestamp: number): string {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
+}
+
 export function ServerDetailPanel({ server, containers, onAction, actionLoading, onRefreshServer, statsHistory: externalStatsHistory }: ServerDetailPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
+  
+  // Prevent rapid toggling
+  const handleOpenChange = useCallback((open: boolean) => {
+    setIsOpen(open);
+  }, []);
   const [lastUpdate, setLastUpdate] = useState(new Date());
   const [internalStatsHistory, setInternalStatsHistory] = useState<StatsDataPoint[]>([]);
   const lastStatsRef = useRef({ cpu: 0, mem: 0, disk: 0 });
+  
+  // Prevent state updates during rapid changes
+  const updateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const statsHistory = externalStatsHistory || internalStatsHistory;
 
@@ -84,9 +100,14 @@ export function ServerDetailPanel({ server, containers, onAction, actionLoading,
   const memPercent = memTotal > 0 ? (memUsed / memTotal) * 100 : 0;
   const diskPercent = diskTotal > 0 ? (diskUsed / diskTotal) * 100 : 0;
 
-  // Collect stats when panel is open and values change
+  // Collect stats when panel is open and values change (debounced)
   useEffect(() => {
     if (!isOpen) return;
+
+    // Clear any pending updates
+    if (updateTimeoutRef.current) {
+      clearTimeout(updateTimeoutRef.current);
+    }
 
     // Only add point if values have changed
     const hasChanged = 
@@ -95,25 +116,34 @@ export function ServerDetailPanel({ server, containers, onAction, actionLoading,
       Math.abs(lastStatsRef.current.disk - diskPercent) > 0.1;
 
     if (hasChanged) {
-      const now = Date.now();
-      const newPoint: StatsDataPoint = {
-        time: formatTimeShort(now),
-        timestamp: now,
-        cpu: Number(cpuPercent.toFixed(1)),
-        memory: Number(memPercent.toFixed(1)),
-        disk: Number(diskPercent.toFixed(1)),
-      };
+      // Debounce updates to prevent UI freezing
+      updateTimeoutRef.current = setTimeout(() => {
+        const now = Date.now();
+        const newPoint: StatsDataPoint = {
+          time: formatTimeShort(now),
+          timestamp: now,
+          cpu: Number(cpuPercent.toFixed(1)),
+          memory: Number(memPercent.toFixed(1)),
+          disk: Number(diskPercent.toFixed(1)),
+        };
 
-      lastStatsRef.current = { cpu: cpuPercent, mem: memPercent, disk: diskPercent };
-      setLastUpdate(new Date());
+        lastStatsRef.current = { cpu: cpuPercent, mem: memPercent, disk: diskPercent };
+        setLastUpdate(new Date());
 
-      setInternalStatsHistory(prev => {
-        // Keep last 24h of data (at 3s intervals, that's ~28800 points max)
-        const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-        const filtered = prev.filter(p => p.timestamp > cutoff);
-        return [...filtered, newPoint].slice(-28800);
-      });
+        setInternalStatsHistory(prev => {
+          // Keep last 24h of data (at 3s intervals, that's ~28800 points max)
+          const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+          const filtered = prev.filter(p => p.timestamp > cutoff);
+          return [...filtered, newPoint].slice(-28800);
+        });
+      }, 100);
     }
+
+    return () => {
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+      }
+    };
   }, [isOpen, cpuPercent, memPercent, diskPercent]);
 
   const serverContainers = containers.filter(c => c.id);
@@ -129,7 +159,7 @@ export function ServerDetailPanel({ server, containers, onAction, actionLoading,
   ];
 
   return (
-    <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+    <Collapsible open={isOpen} onOpenChange={handleOpenChange}>
       <Card className="border-2 border-foreground shadow-xs hover:shadow-sm transition-shadow">
         <CollapsibleTrigger asChild>
           <CardContent className="p-4 cursor-pointer">
@@ -175,8 +205,8 @@ export function ServerDetailPanel({ server, containers, onAction, actionLoading,
           </CardContent>
         </CollapsibleTrigger>
 
-        <CollapsibleContent className="transition-all duration-300 ease-in-out">
-          <div className="border-t-2 border-foreground p-4 bg-secondary/50">
+        <CollapsibleContent className="transition-all duration-300 ease-in-out overflow-hidden">
+          <div className="border-t-2 border-foreground p-4 bg-secondary/50 max-h-[80vh] overflow-y-auto">
             {/* Last Update Indicator */}
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2 text-muted-foreground">
@@ -210,16 +240,39 @@ export function ServerDetailPanel({ server, containers, onAction, actionLoading,
                   <HardDrive className="w-4 h-4 text-chart-4" />
                   <span className="font-mono text-sm">Disk Usage</span>
                 </div>
-                <span className="font-mono text-sm font-bold">{diskPercent.toFixed(1)}%</span>
+                <div className="flex flex-col items-end">
+                  <span className="font-mono text-sm font-bold">{diskPercent.toFixed(1)}%</span>
+                  <span className="font-mono text-[10px] text-muted-foreground">
+                    {diskUsed.toFixed(1)} / {diskTotal.toFixed(1)} GB
+                  </span>
+                </div>
               </div>
               <div className="flex items-center justify-between p-2 border border-foreground bg-background">
                 <div className="flex items-center gap-2">
                   <Wifi className="w-4 h-4 text-chart-3" />
                   <span className="font-mono text-sm">Network</span>
                 </div>
-                <span className="font-mono text-sm text-muted-foreground truncate max-w-[80px]">
-                  {server.address || 'N/A'}
-                </span>
+                <div className="flex flex-col items-end">
+                  {server.network_ingress_bytes !== undefined || server.network_egress_bytes !== undefined ? (
+                    <>
+                      <span className="font-mono text-xs text-muted-foreground">
+                        ↓ {formatBytes(server.network_ingress_bytes || 0)} / ↑ {formatBytes(server.network_egress_bytes || 0)}
+                      </span>
+                      <span className="font-mono text-[10px] text-muted-foreground">
+                        {server.address || 'N/A'}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="font-mono text-xs text-muted-foreground truncate max-w-[100px]">
+                        {server.address || 'N/A'}
+                      </span>
+                      <span className="font-mono text-[10px] text-muted-foreground">
+                        {server.address ? 'Connected' : 'N/A'}
+                      </span>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
 
