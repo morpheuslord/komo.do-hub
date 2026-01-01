@@ -1009,6 +1009,7 @@ export default function Dashboard() {
                       }
                       actionLoading={actionLoading}
                       onRefreshServer={handleRefreshServer}
+                      statsHistory={statsHistory[server.id]}
                     />
                   ))
                 )}
