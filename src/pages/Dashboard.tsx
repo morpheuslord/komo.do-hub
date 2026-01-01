@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/components/ThemeProvider';
 import { Button } from '@/components/ui/button';
@@ -40,6 +40,7 @@ type ResourceType = 'stacks' | 'deployments' | 'servers' | 'builds' | 'repos';
 interface ExtendedStackItem extends StackListItem {
   containers?: Array<{ id: string; name: string; state?: string }>;
   serverName?: string;
+  server_id?: string;
 }
 
 interface ContainerItem {
@@ -51,7 +52,7 @@ interface ContainerItem {
   stats?: string;
   image?: string;
   deploymentId?: string;
-  labels?: Record<string, string>; // Docker labels for stack association
+  labels?: Record<string, string>;
 }
 
 interface ResourceState {
@@ -61,7 +62,7 @@ interface ResourceState {
   builds: BuildListItem[];
   repos: RepoListItem[];
   containersByServer: Record<string, ContainerItem[]>;
-  deploymentMap: Record<string, string>; // container name -> deployment id
+  deploymentMap: Record<string, string>;
 }
 
 function getStatusIcon(state?: string) {
@@ -109,6 +110,7 @@ export default function Dashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const fetchingRef = useRef(false);
   const [resources, setResources] = useState<ResourceState>({
     stacks: [],
     deployments: [],
@@ -119,66 +121,39 @@ export default function Dashboard() {
     deploymentMap: {},
   });
 
-  // Dummy data for bypass/dev mode
-  const dummyData: ResourceState = {
-    stacks: [
-      { id: 'stack-1', name: 'production-web', state: 'running', tags: ['v1.2.3', 'stable'], containers: [{ id: 'c1', name: 'nginx', state: 'running' }, { id: 'c2', name: 'api', state: 'running' }], serverName: 'prod-node-01' },
-      { id: 'stack-2', name: 'staging-api', state: 'running', tags: ['v2.0.0-beta'], containers: [{ id: 'c3', name: 'redis', state: 'running' }], serverName: 'staging-node-01' },
-      { id: 'stack-3', name: 'dev-microservices', state: 'stopped', tags: ['dev'], containers: [], serverName: 'staging-node-01' },
-    ],
-    deployments: [
-      { id: 'deploy-1', name: 'nginx-proxy', state: 'running', serverName: 'prod-node-01', stats: 'Up 3 days', image: 'nginx:latest', deploymentId: 'deploy-1' },
-      { id: 'deploy-2', name: 'postgres-db', state: 'running', serverName: 'prod-node-01', stats: 'Up 3 days', image: 'postgres:15', deploymentId: 'deploy-2' },
-      { id: 'deploy-3', name: 'redis-cache', state: 'running', serverName: 'prod-node-02', stats: 'Up 1 day', image: 'redis:alpine', deploymentId: 'deploy-3' },
-      { id: 'deploy-4', name: 'api-gateway', state: 'pending', serverName: 'staging-node-01', stats: 'Starting...', image: 'api:v2', deploymentId: 'deploy-4' },
-      { id: 'deploy-5', name: 'worker-queue', state: 'stopped', serverName: 'staging-node-01', stats: 'Exited (0)', image: 'worker:latest', deploymentId: 'deploy-5' },
-    ],
-    servers: [
-      { id: 'server-1', name: 'prod-node-01', state: 'healthy', address: '192.168.1.10', cpu_perc: 45.2, mem_used_gb: 12.4, mem_total_gb: 32, disk_used_gb: 180, disk_total_gb: 500 },
-      { id: 'server-2', name: 'prod-node-02', state: 'healthy', address: '192.168.1.11', cpu_perc: 28.7, mem_used_gb: 8.2, mem_total_gb: 32, disk_used_gb: 95, disk_total_gb: 500 },
-      { id: 'server-3', name: 'staging-node-01', state: 'unhealthy', address: '192.168.1.20', cpu_perc: 92.1, mem_used_gb: 30.8, mem_total_gb: 32, disk_used_gb: 480, disk_total_gb: 500 },
-    ],
-    builds: [
-      { id: 'build-1', name: 'frontend-app', state: 'ok' },
-      { id: 'build-2', name: 'backend-api', state: 'building' },
-      { id: 'build-3', name: 'worker-service', state: 'failed' },
-    ],
-    repos: [
-      { id: 'repo-1', name: 'main-monorepo', state: 'ok' },
-      { id: 'repo-2', name: 'infra-config', state: 'ok' },
-    ],
-    containersByServer: {
-      'server-1': [
-        { id: 'c1', name: 'nginx-proxy', state: 'running', serverName: 'prod-node-01' },
-        { id: 'c2', name: 'postgres-db', state: 'running', serverName: 'prod-node-01' },
-      ],
-      'server-2': [
-        { id: 'c3', name: 'redis-cache', state: 'running', serverName: 'prod-node-02' },
-      ],
-      'server-3': [
-        { id: 'c4', name: 'api-gateway', state: 'pending', serverName: 'staging-node-01' },
-        { id: 'c5', name: 'worker-queue', state: 'stopped', serverName: 'staging-node-01' },
-      ],
-    },
-    deploymentMap: {},
-  };
-
   const isBypassMode = localStorage.getItem('komodo_bypass') === 'true';
 
   const fetchResources = useCallback(async (showRefresh = false) => {
+    // Prevent concurrent fetches
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
+
     if (isBypassMode) {
       if (showRefresh) setIsRefreshing(true);
       else setIsLoading(true);
 
       setTimeout(() => {
-        setResources(dummyData);
+        setResources({
+          stacks: [],
+          deployments: [],
+          servers: [],
+          builds: [],
+          repos: [],
+          containersByServer: {},
+          deploymentMap: {},
+        });
         setIsLoading(false);
         setIsRefreshing(false);
+        fetchingRef.current = false;
       }, 500);
       return;
     }
 
-    if (!client) return;
+    if (!client) {
+      fetchingRef.current = false;
+      return;
+    }
+    
     if (showRefresh) setIsRefreshing(true);
     else setIsLoading(true);
 
@@ -194,6 +169,7 @@ export default function Dashboard() {
 
       const serversList: ServerListItem[] = serversRes.data ?? [];
       const deploymentsList: DeploymentListItem[] = deploymentsRes.data ?? [];
+      const stacksList: StackListItem[] = stacksRes.data ?? [];
       
       // Create deployment name -> id mapping
       const deploymentMap: Record<string, string> = {};
@@ -203,25 +179,37 @@ export default function Dashboard() {
         }
       });
 
-      // 2) For each server, fetch runtime state and docker containers
+      // Create server name lookup
+      const serverNameById: Record<string, string> = {};
+      serversList.forEach((s) => {
+        serverNameById[s.id] = s.name;
+      });
+
+      // 2) For each stack, get its full config to find server_id
+      const stackDetailsPromises = stacksList.map(async (stack) => {
+        try {
+          const stackRes = await client.read<any>('GetStack', { stack: stack.id });
+          if (stackRes?.success && stackRes.data) {
+            const config = stackRes.data?.config || stackRes.data;
+            return {
+              ...stack,
+              server_id: config?.server_id || stack.server_id,
+            };
+          }
+        } catch {
+          // ignore
+        }
+        return stack;
+      });
+
+      const stacksWithDetails = await Promise.all(stackDetailsPromises);
+
+      // 3) For each server, fetch runtime state and docker containers
       const containersByServer: Record<string, ContainerItem[]> = {};
       
       const perServerPromises = serversList.map(async (srv) => {
         let runtimeState: string | undefined = srv.state ?? srv.status;
         let containers: ContainerItem[] = [];
-
-        try {
-          const stateRes = await client.read<any>('GetServerState', { server: srv.id }).catch(() =>
-            client.read<any>('GetServer', { server: srv.id }).catch(() => ({ success: false, data: undefined }))
-          );
-
-          if (stateRes?.success && 'data' in stateRes && stateRes.data) {
-            runtimeState =
-              stateRes.data?.health ?? stateRes.data?.status ?? stateRes.data?.state ?? runtimeState;
-          }
-        } catch {
-          // ignore
-        }
 
         // Fetch system stats
         let cpu_perc: number | undefined;
@@ -231,14 +219,52 @@ export default function Dashboard() {
         let disk_total_gb: number | undefined;
 
         try {
-          const statsRes = await client.read<any>('GetSystemStats', { server: srv.id }).catch(() => ({ success: false, data: undefined }));
-          if (statsRes?.success && 'data' in statsRes && statsRes.data) {
+          const statsRes = await client.read<any>('GetSystemStats', { server: srv.id });
+          if (statsRes?.success && statsRes.data) {
             const stats = statsRes.data;
-            cpu_perc = stats.cpu_perc ?? stats.cpu ?? stats.cpu_percent;
-            mem_used_gb = stats.mem_used_gb ?? (stats.mem_used ? stats.mem_used / 1024 / 1024 / 1024 : undefined);
-            mem_total_gb = stats.mem_total_gb ?? (stats.mem_total ? stats.mem_total / 1024 / 1024 / 1024 : undefined);
-            disk_used_gb = stats.disk_used_gb ?? (stats.disk_used ? stats.disk_used / 1024 / 1024 / 1024 : undefined);
-            disk_total_gb = stats.disk_total_gb ?? (stats.disk_total ? stats.disk_total / 1024 / 1024 / 1024 : undefined);
+            // Handle various API response formats
+            cpu_perc = stats.cpu_perc ?? stats.cpu ?? stats.cpu_percent ?? stats.cpu_usage;
+            
+            // Memory - can be in GB or bytes
+            if (stats.mem_used_gb !== undefined) {
+              mem_used_gb = stats.mem_used_gb;
+            } else if (stats.mem_used !== undefined) {
+              mem_used_gb = stats.mem_used / 1024 / 1024 / 1024;
+            } else if (stats.memory_used !== undefined) {
+              mem_used_gb = stats.memory_used / 1024 / 1024 / 1024;
+            }
+            
+            if (stats.mem_total_gb !== undefined) {
+              mem_total_gb = stats.mem_total_gb;
+            } else if (stats.mem_total !== undefined) {
+              mem_total_gb = stats.mem_total / 1024 / 1024 / 1024;
+            } else if (stats.memory_total !== undefined) {
+              mem_total_gb = stats.memory_total / 1024 / 1024 / 1024;
+            }
+            
+            // Disk - handle various formats
+            if (stats.disk_used_gb !== undefined) {
+              disk_used_gb = stats.disk_used_gb;
+            } else if (stats.disk_used !== undefined) {
+              disk_used_gb = stats.disk_used / 1024 / 1024 / 1024;
+            } else if (stats.disks && Array.isArray(stats.disks) && stats.disks.length > 0) {
+              // Sum all disks
+              disk_used_gb = stats.disks.reduce((sum: number, d: any) => sum + (d.used_gb || d.used / 1024 / 1024 / 1024 || 0), 0);
+              disk_total_gb = stats.disks.reduce((sum: number, d: any) => sum + (d.total_gb || d.total / 1024 / 1024 / 1024 || 0), 0);
+            }
+            
+            if (disk_total_gb === undefined) {
+              if (stats.disk_total_gb !== undefined) {
+                disk_total_gb = stats.disk_total_gb;
+              } else if (stats.disk_total !== undefined) {
+                disk_total_gb = stats.disk_total / 1024 / 1024 / 1024;
+              }
+            }
+
+            // Also check for server state in stats
+            if (stats.status || stats.state || stats.health) {
+              runtimeState = stats.health ?? stats.status ?? stats.state ?? runtimeState;
+            }
           }
         } catch {
           // ignore
@@ -247,12 +273,11 @@ export default function Dashboard() {
         try {
           const listContainersRes = await client.read<any[]>('ListDockerContainers', {
             server: srv.id,
-          }).catch(() => ({ success: false, data: undefined }));
+          });
 
-          const containerItems = ('data' in listContainersRes && listContainersRes.data) ? listContainersRes.data : [];
+          const containerItems = listContainersRes?.data ?? [];
 
-          containers = (containerItems || []).map((c: any) => {
-            // Use full container ID for API calls
+          containers = containerItems.map((c: any) => {
             const id = c?.Id ?? c?.id ?? c?.container_id ?? '';
             let rawName =
               (Array.isArray(c?.Names) && c.Names[0]) ||
@@ -264,11 +289,7 @@ export default function Dashboard() {
             const state = c?.State ?? c?.Status ?? c?.state ?? 'unknown';
             const stats = c?.Status ?? c?.status ?? '';
             const image = c?.Image ?? c?.image ?? '';
-            
-            // Capture Docker labels for stack association
             const labels = c?.Labels ?? c?.labels ?? {};
-            
-            // Find matching deployment ID by name
             const deploymentId = deploymentMap[name.toLowerCase()];
             
             return { 
@@ -286,7 +307,7 @@ export default function Dashboard() {
           
           containersByServer[srv.id] = containers;
         } catch {
-          // ignore
+          containersByServer[srv.id] = [];
         }
 
         return {
@@ -306,48 +327,47 @@ export default function Dashboard() {
       const perServerResults = await Promise.all(perServerPromises);
 
       const updatedServers = perServerResults.map((r) => r.server);
-      const allContainersFlat = perServerResults.flatMap((r) =>
-        (r.containers || []).map((c) => ({
-          ...c,
-        }))
-      );
+      const allContainersFlat = perServerResults.flatMap((r) => r.containers || []);
 
-      // Create server name lookup
-      const serverNameById: Record<string, string> = {};
-      updatedServers.forEach((s) => {
-        serverNameById[s.id] = s.name;
-      });
-
-      // Enhance stacks with container info and server name
-      // Use Docker labels for reliable association (compose project, stack name, etc.)
-      const stacksList = stacksRes.data || [];
-      const enhancedStacks: ExtendedStackItem[] = stacksList.map((stack) => {
+      // 4) Enhance stacks with container info using server_id from GetStack
+      const enhancedStacks: ExtendedStackItem[] = stacksWithDetails.map((stack) => {
+        const stackServerId = stack.server_id;
         const stackNameLower = stack.name.toLowerCase();
-        const stackNameNormalized = stackNameLower.replace(/-/g, '_');
+        const stackNameNormalized = stackNameLower.replace(/-/g, '_').replace(/_/g, '');
         
-        // Find containers by Docker Compose/Stack labels first, fallback to name matching
-        const stackContainers = allContainersFlat.filter((c) => {
-          const labels = (c as any).labels || {};
+        // Get containers from the stack's server
+        const serverContainers = stackServerId ? (containersByServer[stackServerId] || []) : allContainersFlat;
+        
+        // Find containers by Docker labels OR name pattern
+        const stackContainers = serverContainers.filter((c) => {
+          const labels = c.labels || {};
           
-          // Check common Docker Compose / Swarm labels
-          const composeProject = labels['com.docker.compose.project']?.toLowerCase();
-          const stackNameLabel = labels['com.docker.stack.namespace']?.toLowerCase();
-          const komodoStack = labels['komodo.stack']?.toLowerCase();
+          // Check Docker Compose / Swarm labels
+          const composeProject = (labels['com.docker.compose.project'] || '').toLowerCase();
+          const stackNameLabel = (labels['com.docker.stack.namespace'] || '').toLowerCase();
+          const komodoStack = (labels['komodo.stack'] || '').toLowerCase();
           
-          // Match by labels (most reliable)
+          // Exact label match
           if (composeProject === stackNameLower || composeProject === stackNameNormalized) return true;
           if (stackNameLabel === stackNameLower || stackNameLabel === stackNameNormalized) return true;
           if (komodoStack === stackNameLower || komodoStack === stackNameNormalized) return true;
           
-          // Fallback: name-based matching for non-labeled containers
+          // Name pattern matching (for containers without labels)
           const containerNameLower = c.name.toLowerCase();
-          return containerNameLower.startsWith(stackNameLower + '_') || 
-                 containerNameLower.startsWith(stackNameLower + '-') ||
-                 containerNameLower.startsWith(stackNameNormalized + '_') ||
-                 containerNameLower.startsWith(stackNameNormalized + '-');
+          const containerNameNormalized = containerNameLower.replace(/-/g, '_').replace(/_/g, '');
+          
+          // Check if container name starts with stack name
+          if (containerNameLower.startsWith(stackNameLower + '_') || 
+              containerNameLower.startsWith(stackNameLower + '-') ||
+              containerNameNormalized.startsWith(stackNameNormalized + '_') ||
+              containerNameNormalized.startsWith(stackNameNormalized)) {
+            return true;
+          }
+          
+          return false;
         });
         
-        const serverName = stack.server_id ? serverNameById[stack.server_id] : 
+        const serverName = stackServerId ? serverNameById[stackServerId] : 
           (stackContainers.length > 0 ? stackContainers[0].serverName : undefined);
         
         return {
@@ -357,11 +377,10 @@ export default function Dashboard() {
         };
       });
 
+      // Update state atomically
       setResources({
         stacks: enhancedStacks,
-        deployments: allContainersFlat.length > 0
-          ? allContainersFlat
-          : (deploymentsList as unknown as ContainerItem[]),
+        deployments: allContainersFlat,
         servers: updatedServers,
         builds: buildsRes.data || [],
         repos: reposRes.data || [],
@@ -369,6 +388,7 @@ export default function Dashboard() {
         deploymentMap,
       });
     } catch (error) {
+      console.error('[Dashboard] Fetch error:', error);
       toast({
         title: 'Error',
         description: 'Failed to fetch resources',
@@ -377,6 +397,7 @@ export default function Dashboard() {
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
+      fetchingRef.current = false;
     }
   }, [client, isBypassMode, toast]);
 
@@ -384,11 +405,10 @@ export default function Dashboard() {
     fetchResources();
   }, [fetchResources]);
 
-  // Auto-refresh ALL resources continuously every 3 seconds for smooth real-time updates
+  // Auto-refresh every 3 seconds
   useEffect(() => {
-    if (isBypassMode) return; // Skip polling in bypass mode
+    if (isBypassMode) return;
     
-    // Initial fetch already done, so we start the polling immediately
     const interval = setInterval(() => {
       fetchResources(true);
     }, 3000);
@@ -404,7 +424,6 @@ export default function Dashboard() {
     try {
       let result;
       
-      // For container actions, we need to use deployment parameter
       const isContainerAction = ['start', 'stop', 'restart'].includes(action) && 
         (resourceType === 'deployments' || resourceType.toLowerCase().includes('container'));
       
@@ -482,12 +501,11 @@ export default function Dashboard() {
 
     const container = resources.deployments.find((c) => c.id === containerId);
     const serverId = container?.serverId;
-    const dockerContainerName = container?.name || containerName;
 
     if (!serverId) {
       toast({
         title: 'Action Failed',
-        description: 'Missing server id for this container. Refresh and try again.',
+        description: 'Missing server id for this container.',
         variant: 'destructive',
       });
       return;
@@ -497,17 +515,9 @@ export default function Dashboard() {
 
     try {
       let result;
-      // Use the full Docker container ID (hash) for API calls, not the name
-      const dockerContainerId = container?.id || containerId;
-      const params = { server: serverId, container: dockerContainerId };
+      const params = { server: serverId, container: containerId };
       
-      // Debug log for troubleshooting
-      console.log(`[Container Action] ${action}`, { 
-        serverId, 
-        containerId: dockerContainerId, 
-        containerName: dockerContainerName,
-        params 
-      });
+      console.log(`[Container Action] ${action}`, params);
 
       switch (action) {
         case 'start':
@@ -525,13 +535,10 @@ export default function Dashboard() {
 
       const serverError = (result as any)?.data?.error;
       
-      // Debug log for response
-      console.log(`[Container Action] ${action} response`, { result, serverError });
-
       if (result?.success && !serverError) {
         toast({
           title: 'Action Started',
-          description: `${action} on ${dockerContainerName} initiated`,
+          description: `${action} on ${containerName} initiated`,
         });
         setTimeout(() => fetchResources(true), 1500);
       } else {
@@ -553,8 +560,6 @@ export default function Dashboard() {
   };
 
   const handleRefreshServer = useCallback((serverId: string) => {
-    // In a real implementation, this would fetch just that server's data
-    // For now, we trigger a full refresh
     fetchResources(true);
   }, [fetchResources]);
 
@@ -653,9 +658,9 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col overflow-hidden">
       {/* Header */}
-      <header className="border-b-2 border-foreground bg-card sticky top-0 z-10">
+      <header className="border-b-2 border-foreground bg-card flex-shrink-0">
         <div className="flex items-center justify-between p-4">
           <div className="flex items-center gap-3">
             <img src={komodoLogo} alt="Komodo" className="w-10 h-10 object-contain" />
@@ -693,47 +698,47 @@ export default function Dashboard() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 p-4 flex flex-col min-h-0">
+      <main className="flex-1 p-4 flex flex-col min-h-0 overflow-hidden">
         <Tabs
           value={activeTab}
           onValueChange={(v) => setActiveTab(v as ResourceType)}
           className="flex flex-col flex-1 min-h-0"
         >
-          <TabsList className="w-full grid grid-cols-5 border-2 border-foreground h-auto p-0 bg-secondary">
+          <TabsList className="w-full grid grid-cols-5 border-2 border-foreground h-auto p-0 bg-secondary flex-shrink-0">
             {(Object.keys(tabConfig) as ResourceType[]).map((key) => (
               <TabsTrigger
-                    key={key}
-                    value={key}
-                    className="
-                      group
-                      flex flex-col items-center gap-1 py-3 font-mono text-xs
-                      border-r-2 border-foreground last:border-r-0
-                      data-[state=active]:bg-primary
-                      data-[state=active]:text-primary-foreground
-                    "
-                  >
+                key={key}
+                value={key}
+                className="
+                  group
+                  flex flex-col items-center gap-1 py-3 font-mono text-xs
+                  border-r-2 border-foreground last:border-r-0
+                  data-[state=active]:bg-primary
+                  data-[state=active]:text-primary-foreground
+                "
+              >
                 {tabConfig[key].icon}
                 <span className="hidden sm:inline">{tabConfig[key].label}</span>
                 <Badge
-                className="
-                  text-[10px] px-1 py-0
-                  border-foreground
-                  group-data-[state=active]:bg-primary-foreground
-                  group-data-[state=active]:text-primary
-                  group-data-[state=active]:border-primary-foreground
-                "
-                variant="outline"
-              >
-                {resources[key].length}
-              </Badge>
+                  className="
+                    text-[10px] px-1 py-0
+                    border-foreground
+                    group-data-[state=active]:bg-primary-foreground
+                    group-data-[state=active]:text-primary
+                    group-data-[state=active]:border-primary-foreground
+                  "
+                  variant="outline"
+                >
+                  {resources[key].length}
+                </Badge>
               </TabsTrigger>
             ))}
           </TabsList>
 
           {/* Stacks Tab */}
-          <TabsContent value="stacks" className="mt-4 flex-1 min-h-0">
+          <TabsContent value="stacks" className="mt-4 flex-1 min-h-0 overflow-hidden">
             <ScrollArea className="h-full">
-              <div className="space-y-3 pr-2">
+              <div className="space-y-3 pr-2 pb-4">
                 {resources.stacks.length === 0 ? (
                   <Card className="border-2 border-dashed border-muted-foreground">
                     <CardContent className="p-8 text-center">
@@ -762,9 +767,9 @@ export default function Dashboard() {
           </TabsContent>
 
           {/* Containers Tab */}
-          <TabsContent value="deployments" className="mt-4 flex-1 min-h-0">
+          <TabsContent value="deployments" className="mt-4 flex-1 min-h-0 overflow-hidden">
             <ScrollArea className="h-full">
-              <div className="space-y-3 pr-2">
+              <div className="space-y-3 pr-2 pb-4">
                 {resources.deployments.length === 0 ? (
                   <Card className="border-2 border-dashed border-muted-foreground">
                     <CardContent className="p-8 text-center">
@@ -791,9 +796,9 @@ export default function Dashboard() {
           </TabsContent>
 
           {/* Servers Tab */}
-          <TabsContent value="servers" className="mt-4 flex-1 min-h-0">
+          <TabsContent value="servers" className="mt-4 flex-1 min-h-0 overflow-hidden">
             <ScrollArea className="h-full">
-              <div className="space-y-3 pr-2">
+              <div className="space-y-3 pr-2 pb-4">
                 {resources.servers.length === 0 ? (
                   <Card className="border-2 border-dashed border-muted-foreground">
                     <CardContent className="p-8 text-center">
@@ -822,9 +827,9 @@ export default function Dashboard() {
           </TabsContent>
 
           {/* Builds Tab */}
-          <TabsContent value="builds" className="mt-4 flex-1 min-h-0">
+          <TabsContent value="builds" className="mt-4 flex-1 min-h-0 overflow-hidden">
             <ScrollArea className="h-full">
-              <div className="space-y-3 pr-2">
+              <div className="space-y-3 pr-2 pb-4">
                 {resources.builds.length === 0 ? (
                   <Card className="border-2 border-dashed border-muted-foreground">
                     <CardContent className="p-8 text-center">
@@ -851,9 +856,9 @@ export default function Dashboard() {
           </TabsContent>
 
           {/* Repos Tab */}
-          <TabsContent value="repos" className="mt-4 flex-1 min-h-0">
+          <TabsContent value="repos" className="mt-4 flex-1 min-h-0 overflow-hidden">
             <ScrollArea className="h-full">
-              <div className="space-y-3 pr-2">
+              <div className="space-y-3 pr-2 pb-4">
                 {resources.repos.length === 0 ? (
                   <Card className="border-2 border-dashed border-muted-foreground">
                     <CardContent className="p-8 text-center">
@@ -882,7 +887,7 @@ export default function Dashboard() {
       </main>
 
       {/* Footer Stats */}
-      <footer className="border-t-2 border-foreground bg-card p-3">
+      <footer className="border-t-2 border-foreground bg-card p-3 flex-shrink-0">
         <div className="flex justify-between items-center">
           <div className="flex gap-4 font-mono text-xs text-muted-foreground">
             <span>{resources.servers.length} servers</span>
