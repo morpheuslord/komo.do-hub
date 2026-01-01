@@ -413,13 +413,28 @@ export default function Dashboard() {
 
               // Name pattern matching (for containers without labels)
               const containerNameLower = c.name.toLowerCase();
-              return (
+              
+              // Direct name match or starts with stack name followed by separator
+              if (
                 containerNameLower === stackNameLower ||
                 containerNameLower.startsWith(stackNameLower + "_") ||
                 containerNameLower.startsWith(stackNameLower + "-") ||
                 containerNameLower.startsWith(stackNameNormalized + "_") ||
                 containerNameLower.startsWith(stackNameNormalized + "-")
-              );
+              ) {
+                return true;
+              }
+
+              // Handle cases where stack name might be a prefix without separator
+              // (e.g. stack "db" and container "db-main" or "db_sql")
+              // But be careful not to match "database" to "db"
+              if (containerNameLower.includes(stackNameLower) || containerNameLower.includes(stackNameNormalized)) {
+                // If the container name contains the stack name as a distinct part
+                const parts = containerNameLower.split(/[-_.]/);
+                return parts.some(p => p === stackNameLower || p === stackNameNormalized);
+              }
+
+              return false;
             });
 
             const serverName = stackServerId
