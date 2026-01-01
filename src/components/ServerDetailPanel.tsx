@@ -39,6 +39,7 @@ interface ServerDetailPanelProps {
   onAction: (action: string, resourceId: string, resourceName: string) => void;
   actionLoading: string | null;
   onRefreshServer?: (serverId: string) => void;
+  statsHistory?: StatsDataPoint[];
 }
 
 function getStatusIcon(state?: string) {
@@ -67,11 +68,13 @@ function formatTimeShort(timestamp: number): string {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-export function ServerDetailPanel({ server, containers, onAction, actionLoading, onRefreshServer }: ServerDetailPanelProps) {
+export function ServerDetailPanel({ server, containers, onAction, actionLoading, onRefreshServer, statsHistory: externalStatsHistory }: ServerDetailPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(new Date());
-  const [statsHistory, setStatsHistory] = useState<StatsDataPoint[]>([]);
+  const [internalStatsHistory, setInternalStatsHistory] = useState<StatsDataPoint[]>([]);
   const lastStatsRef = useRef({ cpu: 0, mem: 0, disk: 0 });
+
+  const statsHistory = externalStatsHistory || internalStatsHistory;
 
   const cpuPercent = server.cpu_perc ?? 0;
   const memUsed = server.mem_used_gb ?? 0;
@@ -104,7 +107,7 @@ export function ServerDetailPanel({ server, containers, onAction, actionLoading,
       lastStatsRef.current = { cpu: cpuPercent, mem: memPercent, disk: diskPercent };
       setLastUpdate(new Date());
 
-      setStatsHistory(prev => {
+      setInternalStatsHistory(prev => {
         // Keep last 24h of data (at 3s intervals, that's ~28800 points max)
         const cutoff = Date.now() - 24 * 60 * 60 * 1000;
         const filtered = prev.filter(p => p.timestamp > cutoff);
