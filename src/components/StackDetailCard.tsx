@@ -3,6 +3,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { ContainerDetailsDialog } from '@/components/ContainerDetailsDialog';
 import {
   Layers,
   ChevronDown,
@@ -11,7 +12,8 @@ import {
   Box,
   Play,
   Loader2,
-  Activity
+  Activity,
+  ExternalLink
 } from 'lucide-react';
 
 interface StackContainer {
@@ -87,10 +89,18 @@ function computeStackState(stackState: string | undefined, containers: StackCont
 
 export function StackDetailCard({ stack, serverName, containers, onAction, actionLoading }: StackDetailCardProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [selectedContainer, setSelectedContainer] = useState<StackContainer | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
   
   // Prevent rapid toggling
   const handleOpenChange = useCallback((open: boolean) => {
     setIsOpen(open);
+  }, []);
+
+  const handleContainerClick = useCallback((container: StackContainer, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedContainer(container);
+    setIsDialogOpen(true);
   }, []);
   
   const derivedState = computeStackState(stack.state || stack.status, containers);
@@ -202,15 +212,20 @@ export function StackDetailCard({ stack, serverName, containers, onAction, actio
                   {containers.map((container) => (
                     <div
                       key={container.id}
-                      className="flex items-center justify-between p-2 border border-foreground bg-background text-xs"
+                      className="flex items-center justify-between p-2 border border-foreground bg-background text-xs hover:bg-secondary/50 hover:border-foreground/80 transition-all cursor-pointer group"
+                      onClick={(e) => handleContainerClick(container, e)}
+                      title="Click to view container details"
                     >
                       <div className="flex items-center gap-2 min-w-0 flex-1">
                         {getStatusIcon(container.state)}
-                        <span className="font-mono truncate">{container.name}</span>
+                        <span className="font-mono truncate group-hover:text-foreground/80">{container.name}</span>
                       </div>
-                      <Badge variant={getStatusVariant(container.state)} className="font-mono text-[10px]">
-                        {container.state || 'unknown'}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={getStatusVariant(container.state)} className="font-mono text-[10px]">
+                          {container.state || 'unknown'}
+                        </Badge>
+                        <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-50 transition-opacity text-muted-foreground" />
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -227,6 +242,21 @@ export function StackDetailCard({ stack, serverName, containers, onAction, actio
           </div>
         </CollapsibleContent>
       </Card>
+      {selectedContainer && (
+        <ContainerDetailsDialog
+          open={isDialogOpen}
+          onOpenChange={setIsDialogOpen}
+          container={{
+            id: selectedContainer.id,
+            name: selectedContainer.name,
+            state: selectedContainer.state,
+            serverName: serverName,
+            serverId: stack.server_id,
+          }}
+          onAction={onAction}
+          actionLoading={actionLoading}
+        />
+      )}
     </Collapsible>
   );
 }

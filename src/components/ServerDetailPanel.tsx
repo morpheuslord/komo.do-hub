@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { Progress } from '@/components/ui/progress';
+import { ContainerDetailsDialog } from '@/components/ContainerDetailsDialog';
 import {
   Server,
   ChevronDown,
@@ -20,7 +21,9 @@ import {
   RotateCcw,
   Trash2,
   Loader2,
-  RefreshCw
+  RefreshCw,
+  ExternalLink,
+  Network
 } from 'lucide-react';
 import type { ServerListItem } from '@/lib/komodo-api';
 import { ServerStatsChart } from './ServerStatsChart';
@@ -78,10 +81,18 @@ function formatBytes(bytes: number): string {
 
 export function ServerDetailPanel({ server, containers, onAction, actionLoading, onRefreshServer, statsHistory: externalStatsHistory }: ServerDetailPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [selectedContainer, setSelectedContainer] = useState<{ id: string; name: string; state?: string } | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
   
   // Prevent rapid toggling
   const handleOpenChange = useCallback((open: boolean) => {
     setIsOpen(open);
+  }, []);
+
+  const handleContainerClick = useCallback((container: { id: string; name: string; state?: string }, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedContainer(container);
+    setIsDialogOpen(true);
   }, []);
   const [lastUpdate, setLastUpdate] = useState(new Date());
   const [internalStatsHistory, setInternalStatsHistory] = useState<StatsDataPoint[]>([]);
@@ -179,6 +190,12 @@ export function ServerDetailPanel({ server, containers, onAction, actionLoading,
                       <Box className="w-3 h-3 mr-1" />
                       {runningContainers.length}/{serverContainers.length}
                     </Badge>
+                    {server.address && (
+                      <Badge variant="outline" className="font-mono text-xs">
+                        <Network className="w-3 h-3 mr-1" />
+                        {server.address}
+                      </Badge>
+                    )}
                   </div>
                 </div>
               </div>
@@ -232,6 +249,21 @@ export function ServerDetailPanel({ server, containers, onAction, actionLoading,
                 </Button>
               </div>
             </div>
+
+            {/* Server IP Address */}
+            {server.address && (
+              <div className="mb-4 p-3 border-2 border-foreground bg-background rounded-sm">
+                <div className="flex items-center gap-2 mb-1">
+                  <Network className="w-4 h-4 text-chart-1" />
+                  <span className="font-mono text-sm font-bold">Server IP Address</span>
+                </div>
+                <div className="mt-2">
+                  <code className="font-mono text-sm bg-secondary px-2 py-1 border border-foreground rounded">
+                    {server.address}
+                  </code>
+                </div>
+              </div>
+            )}
 
             {/* Disk & Network Stats */}
             <div className="grid grid-cols-2 gap-2">
@@ -315,15 +347,20 @@ export function ServerDetailPanel({ server, containers, onAction, actionLoading,
                   {serverContainers.map((container) => (
                     <div
                       key={container.id}
-                      className="flex items-center justify-between p-2 border border-foreground bg-background text-xs"
+                      className="flex items-center justify-between p-2 border border-foreground bg-background text-xs hover:bg-secondary/50 hover:border-foreground/80 transition-all cursor-pointer group"
+                      onClick={(e) => handleContainerClick(container, e)}
+                      title="Click to view container details"
                     >
                       <div className="flex items-center gap-2 min-w-0 flex-1">
                         {getStatusIcon(container.state)}
-                        <span className="font-mono truncate">{container.name}</span>
+                        <span className="font-mono truncate group-hover:text-foreground/80">{container.name}</span>
                       </div>
-                      <Badge variant={getStatusVariant(container.state)} className="font-mono text-[10px]">
-                        {container.state || 'unknown'}
-                      </Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge variant={getStatusVariant(container.state)} className="font-mono text-[10px]">
+                          {container.state || 'unknown'}
+                        </Badge>
+                        <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-50 transition-opacity text-muted-foreground" />
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -367,6 +404,21 @@ export function ServerDetailPanel({ server, containers, onAction, actionLoading,
           </div>
         </CollapsibleContent>
       </Card>
+      {selectedContainer && (
+        <ContainerDetailsDialog
+          open={isDialogOpen}
+          onOpenChange={setIsDialogOpen}
+          container={{
+            id: selectedContainer.id,
+            name: selectedContainer.name,
+            state: selectedContainer.state,
+            serverName: server.name,
+            serverId: server.id,
+          }}
+          onAction={onAction}
+          actionLoading={actionLoading}
+        />
+      )}
     </Collapsible>
   );
 }

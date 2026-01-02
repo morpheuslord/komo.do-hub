@@ -15,8 +15,12 @@ import {
   Loader2,
   Activity,
   Terminal,
-  Layers
+  Layers,
+  Network,
+  FileText,
 } from 'lucide-react';
+import { ContainerPortsDialog } from '@/components/ContainerPortsDialog';
+import { ContainerLogsDialog } from '@/components/ContainerLogsDialog';
 
 interface ContainerDetailPanelProps {
   container: {
@@ -66,6 +70,8 @@ function formatBytes(bytes: number): string {
 export function ContainerDetailPanel({ container, onAction, actionLoading }: ContainerDetailPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [uptime, setUptime] = useState(container.stats || '');
+  const [portsDialogOpen, setPortsDialogOpen] = useState(false);
+  const [logsDialogOpen, setLogsDialogOpen] = useState(false);
   
   // Prevent rapid toggling
   const handleOpenChange = useCallback((open: boolean) => {
@@ -228,9 +234,63 @@ export function ContainerDetailPanel({ container, onAction, actionLoading }: Con
                 </Button>
               ))}
             </div>
+
+            {/* Management Options */}
+            <div className="mt-4 pt-4 border-t-2 border-foreground">
+              <h4 className="font-mono text-xs font-bold mb-2 uppercase">Management Options</h4>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-2 font-mono text-xs"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setPortsDialogOpen(true);
+                  }}
+                >
+                  <Network className="h-3 w-3 mr-1" />
+                  Ports
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-2 font-mono text-xs"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setLogsDialogOpen(true);
+                  }}
+                >
+                  <FileText className="h-3 w-3 mr-1" />
+                  Logs
+                </Button>
+              </div>
+            </div>
           </div>
         </CollapsibleContent>
       </Card>
+
+      {/* Ports Dialog */}
+      <ContainerPortsDialog
+        open={portsDialogOpen}
+        onOpenChange={setPortsDialogOpen}
+        container={{
+          id: container.id,
+          name: container.name,
+          serverId: container.serverId,
+        }}
+      />
+
+      {/* Logs Dialog */}
+      <ContainerLogsDialog
+        open={logsDialogOpen}
+        onOpenChange={setLogsDialogOpen}
+        container={{
+          id: container.id,
+          name: container.name,
+          serverId: container.serverId,
+          serverName: container.serverName,
+        }}
+      />
     </Collapsible>
   );
 }
