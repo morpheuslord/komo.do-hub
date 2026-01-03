@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/components/ThemeProvider";
 import { Button } from "@/components/ui/button";
@@ -817,7 +817,7 @@ export default function Dashboard() {
 
   const tabConfig = {
     stacks: {
-      icon: <Layers className="w-4 h-4" />,
+      icon: <Layers className="w-5 h-5" />,
       label: "Stacks",
       resourceIcon: <Layers className="w-5 h-5" />,
       actions: [
@@ -829,19 +829,19 @@ export default function Dashboard() {
       ],
     },
     deployments: {
-      icon: <Box className="w-4 h-4" />,
+      icon: <Box className="w-5 h-5" />,
       label: "Containers",
       resourceIcon: <Box className="w-5 h-5" />,
       actions: [],
     },
     servers: {
-      icon: <Server className="w-4 h-4" />,
+      icon: <Server className="w-5 h-5" />,
       label: "Servers",
       resourceIcon: <Server className="w-5 h-5" />,
       actions: [],
     },
     builds: {
-      icon: <Hammer className="w-4 h-4" />,
+      icon: <Hammer className="w-5 h-5" />,
       label: "Builds",
       resourceIcon: <Hammer className="w-5 h-5" />,
       actions: [
@@ -849,7 +849,7 @@ export default function Dashboard() {
       ],
     },
     repos: {
-      icon: <GitBranch className="w-4 h-4" />,
+      icon: <GitBranch className="w-5 h-5" />,
       label: "Repos",
       resourceIcon: <GitBranch className="w-5 h-5" />,
       actions: [
@@ -936,21 +936,29 @@ export default function Dashboard() {
                 className="
                   group
                   relative
-                  flex flex-col items-center gap-1 py-3 font-mono text-xs
+                  flex flex-col items-center justify-center gap-2 py-4 px-2 font-mono
                   border-r-[3px] border-foreground last:border-r-0
+                  bg-secondary
                   data-[state=active]:bg-primary
                   data-[state=active]:text-primary-foreground
                   data-[state=active]:border-primary-foreground
                   data-[state=active]:border-r-[3px]
+                  data-[state=active]:border-l-[3px]
+                  data-[state=active]:border-b-[3px]
+                  data-[state=active]:mb-[-2px]
                   data-[state=active]:z-[1]
+                  transition-colors
                 "
               >
-                {tabConfig[key].icon}
-                <span className="hidden sm:inline">{tabConfig[key].label}</span>
+                <div className="flex-shrink-0 text-foreground group-data-[state=active]:text-primary-foreground">
+                  {tabConfig[key].icon}
+                </div>
+                <span className="text-xs font-medium hidden sm:block">{tabConfig[key].label}</span>
                 <Badge
                   className="
-                    text-[10px] px-1 py-0
-                    border-foreground
+                    text-[10px] font-bold
+                    h-5 w-5 rounded-full p-0 flex items-center justify-center
+                    border-2 border-foreground bg-background text-foreground
                     group-data-[state=active]:bg-primary-foreground
                     group-data-[state=active]:text-primary
                     group-data-[state=active]:border-primary-foreground
