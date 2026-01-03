@@ -928,17 +928,21 @@ export default function Dashboard() {
           onValueChange={(v) => setActiveTab(v as ResourceType)}
           className="flex flex-col flex-1 min-h-0"
         >
-          <TabsList className="w-full grid grid-cols-5 border-2 border-foreground h-auto p-0 bg-secondary flex-shrink-0">
+          <TabsList className="relative w-full grid grid-cols-5 border-2 border-foreground h-auto p-0 bg-secondary flex-shrink-0 gap-0">
             {(Object.keys(tabConfig) as ResourceType[]).map((key) => (
               <TabsTrigger
                 key={key}
                 value={key}
                 className="
                   group
+                  relative
                   flex flex-col items-center gap-1 py-3 font-mono text-xs
-                  border-r-2 border-foreground last:border-r-0
+                  border-r-[3px] border-foreground last:border-r-0
                   data-[state=active]:bg-primary
                   data-[state=active]:text-primary-foreground
+                  data-[state=active]:border-primary-foreground
+                  data-[state=active]:border-r-[3px]
+                  data-[state=active]:z-[1]
                 "
               >
                 {tabConfig[key].icon}
