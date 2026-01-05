@@ -3,7 +3,9 @@
 // This is NOT encryption but provides reasonable local protection
 
 const CREDENTIALS_KEY = 'komodo-credentials';
-const SCRAMBLE_KEY = 'K0m0d0-Scr4mbl3-K3y-2024'; // Obfuscation key
+// Get scramble key from environment variable, with fallback for development
+// In production, set VITE_SCRAMBLE_KEY in your environment
+const SCRAMBLE_KEY = import.meta.env.VITE_SCRAMBLE_KEY || 'K0m0d0-Scr4mbl3-K3y-2024'; // Obfuscation key
 
 /* =========================
    XOR Scramble (works everywhere including Android WebView)
